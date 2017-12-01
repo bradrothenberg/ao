@@ -85,13 +85,14 @@ TEST_CASE("Mesh::render (performance)")
 
     // Begin timekeeping
     start = std::chrono::system_clock::now();
-    auto mesh = Mesh::render(sponge, r, 0.1);
+    auto mesh = Mesh::render(sponge, r, 0.01);
     end = std::chrono::system_clock::now();
 
     elapsed = end - start;
 
     auto elapsed_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+    mesh->saveSTL("spongeMesh.stl");
 
     std::string log = "\nMade sponge mesh in " +
            std::to_string(elapsed.count()) + " sec";
