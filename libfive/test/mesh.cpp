@@ -130,7 +130,7 @@ TEST_CASE("Mesh::generate (loft)")
   Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
 
   start = std::chrono::system_clock::now();
-  auto mesh = Mesh::render(loftCircs, r, 0.0125);
+  auto mesh = Mesh::render(loftCircs, r, 0.05);
   end = std::chrono::system_clock::now();
   elapsed = end - start;
 
@@ -276,9 +276,6 @@ TEST_CASE("Mesh::generate (schwartz)")
  
  auto sphere1 = sphere(3.0f, { 0.f,0.f,0.f });
 
- Kernel::Tree box = max(max(max(max(max(Kernel::Tree::X() - radius, -Kernel::Tree::X() - radius),
-                        Kernel::Tree::Y() - radius), -Kernel::Tree::Y() - radius),
-                        Kernel::Tree::Z() - radius), -Kernel::Tree::Z() - radius);
  Kernel::Tree schwarz = cos(Kernel::Tree::X() / scale) + cos(Kernel::Tree::Y() / scale) + cos(Kernel::Tree::Z() / scale);
  Kernel::Tree boxschwarz = max(sphere1, schwarz);
 
