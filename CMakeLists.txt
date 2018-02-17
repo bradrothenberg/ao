@@ -13,7 +13,6 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 ################################################################################
 
-
 if(MSVC)
     set(CMAKE_CXX_FLAGS "-Wall -bigobj ")
     set(CMAKE_CXX_FLAGS_RELEASE  "-DRELEASE -DEIGEN_NO_DEBUG")
@@ -39,15 +38,23 @@ endif()
 
 ################################################################################
 # Find all packages here at the top level so we can print debugging info
-find_package(Qt5Core)
-find_package(Boost REQUIRED)
-find_package(PNG REQUIRED)
+if(NOT MSVC)
+    find_package(Qt5Core)
+    find_package(Boost REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GUILE guile-2.2)
+    pkg_check_modules(EIGEN REQUIRED eigen3)
+else()
+    find_package(eigen3 REQUIRED)
+    find_package(boost REQUIRED)
+endif()
 
 if(APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GUILE guile-2.2)
     pkg_check_modules(EIGEN REQUIRED eigen3)
 endif(APPLE)
+
 
 if (UNIX AND NOT(APPLE))
     find_package(Threads REQUIRED)
