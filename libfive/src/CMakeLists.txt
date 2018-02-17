@@ -16,6 +16,7 @@ ADD_CUSTOM_COMMAND(
 add_library(five ${LINK_TYPE}
     eval/base.cpp
     eval/eval_interval.cpp
+    eval/eval_interval_array.cpp
     eval/eval_jacobian.cpp
     eval/eval_array.cpp
     eval/eval_deriv_array.cpp
