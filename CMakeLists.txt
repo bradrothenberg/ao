@@ -42,8 +42,8 @@ if(NOT MSVC)
     find_package(Qt5Core)
     find_package(Boost REQUIRED)
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(GUILE guile-2.2)
-    pkg_check_modules(EIGEN REQUIRED eigen3)
+    pkg_check_modules(GUILE guile-2.2>=2.2.1)
+    pkg_check_modules(EIGEN REQUIRED eigen3>=3.3.0)
 else()
     find_package(eigen3 REQUIRED)
     find_package(boost REQUIRED)
@@ -87,6 +87,9 @@ else ()
 endif()
 
 ################################################################################
+
+# Set a flag to detect the case where users run CMake in the wrong directory
+set(LIBFIVE_BUILD_FROM_ROOT true)
 
 # Always build the kernel and test suite
 add_subdirectory(libfive)

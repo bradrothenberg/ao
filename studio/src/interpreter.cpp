@@ -57,6 +57,7 @@ port-eof?
     scm_valid_sym = scm_from_utf8_symbol("valid");
     scm_result_fmt = scm_from_locale_string("~S");
     scm_other_error_fmt = scm_from_locale_string("~A: ~A");
+    scm_in_function_fmt = scm_from_locale_string("In function ~A:\n~A");
     scm_syntax_error_fmt = scm_from_locale_string("~A: ~A in form ~A");
     scm_numerical_overflow_fmt = scm_from_locale_string("~A: ~A in ~A");
 
@@ -64,7 +65,8 @@ port-eof?
     for (auto s : {scm_eval_sandboxed, scm_port_eof_p, scm_valid_sym,
                    scm_syntax_error_sym, scm_numerical_overflow_sym,
                    scm_result_fmt, scm_syntax_error_fmt,
-                   scm_numerical_overflow_fmt, scm_other_error_fmt})
+                   scm_numerical_overflow_fmt, scm_other_error_fmt,
+                   scm_in_function_fmt})
     {
         scm_permanent_object(s);
     }
@@ -158,6 +160,11 @@ void _Interpreter::eval()
             _str = scm_simple_format(SCM_BOOL_F, scm_other_error_fmt,
                    scm_list_2(key, scm_simple_format(
                         SCM_BOOL_F, scm_cadr(params), scm_caddr(params))));
+        }
+        if (!scm_is_false(scm_car(params)))
+        {
+            _str = scm_simple_format(SCM_BOOL_F, scm_in_function_fmt,
+                                     scm_list_2(scm_car(params), _str));
         }
         auto str = scm_to_locale_string(_str);
         auto stack = scm_to_locale_string(_stack);
