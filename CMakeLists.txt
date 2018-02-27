@@ -47,6 +47,7 @@ if(NOT MSVC)
 else()
     find_package(eigen3 REQUIRED)
     find_package(boost REQUIRED)
+    find_package(PNG REQUIRED)
 endif()
 
 if(APPLE)

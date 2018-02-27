@@ -27,40 +27,40 @@ TEST_CASE("Feature::push")
     SECTION("Pushing zero-length epsilon")
     {
         Feature f(Eigen::Vector3f::Zero());
-        REQUIRE(f.push({0, 0, 0}) == false);
+        REQUIRE(f.push({0.f, 0.f, 0.f}) == false);
     }
     SECTION("Separated by exactly 180 degrees")
     {
         Feature f(Eigen::Vector3f::Zero());
-        REQUIRE(f.push({1, 0, 0}) == true);
-        REQUIRE(f.push({-1, 0, 0}) == false);
+        REQUIRE(f.push({1.f, 0.f, 0.f}) == true);
+        REQUIRE(f.push({-1.f, 0.f, 0.f}) == false);
     }
     SECTION("Separability testing")
     {
         Feature a(Eigen::Vector3f::Zero());
-        REQUIRE(a.push({1, 0, 0}) == true);
-        REQUIRE(a.push({0, 1, 0}) == true);
-        REQUIRE(a.push({0, 0, 1}) == true);
-        REQUIRE(a.push({1, 1, 1}) == true);
-        REQUIRE(a.push({-1, -1, -1}) == false);
+        REQUIRE(a.push({1.f, 0.f, 0.f}) == true);
+        REQUIRE(a.push({0.f, 1.f, 0.f}) == true);
+        REQUIRE(a.push({0.f, 0.f, 1.f}) == true);
+        REQUIRE(a.push({1.f, 1.f, 1.f}) == true);
+        REQUIRE(a.push({-1.f, -1.f, -1.f}) == false);
 
         Feature b(Eigen::Vector3f::Zero());
-        REQUIRE(b.push({1, 0, 0}) == true);
-        REQUIRE(b.push({0, -1, 0}) == true);
-        REQUIRE(b.push({0, 0, -1}) == true);
-        REQUIRE(b.push({0, 0, -1}) == true);
-        REQUIRE(b.push({0, -1, 0}) == true);
-        REQUIRE(b.push({-1, 1, 1}) == false);
-        REQUIRE(b.push({1, -1, -1}) == true);
+        REQUIRE(b.push({1.f, 0.f, 0.f}) == true);
+        REQUIRE(b.push({0.f, -1.f, 0.f }) == true);
+        REQUIRE(b.push({0.f, 0.f, -1.f }) == true);
+        REQUIRE(b.push({0.f, 0.f, -1.f }) == true);
+        REQUIRE(b.push({0.f, -1.f, 0.f }) == true);
+        REQUIRE(b.push({-1.f, 1.f, 1.f}) == false);
+        REQUIRE(b.push({1.f, -1.f, -1.f}) == true);
     }
 
     SECTION("Fun with numerical instability")
     {
         Feature a(Eigen::Vector3f::Zero());
-        auto s = sqrt(2);
-        REQUIRE(a.push({s,  0, -s}) == true);
-        REQUIRE(a.push({s,  0,  s}) == true);
-        REQUIRE(a.push({1, 0, -1}) == true);
+        auto s = (float)sqrt(2);
+        REQUIRE(a.push({s,  0.f, -s}) == true);
+        REQUIRE(a.push({s,  0.f,  s}) == true);
+        REQUIRE(a.push({1.f, 0.f, -1.f}) == true);
     }
 }
 
@@ -69,13 +69,13 @@ TEST_CASE("Feature::check")
     SECTION("Flat plane")
     {
         Feature a(Eigen::Vector3f::Zero());
-        REQUIRE(a.push({-1, 1, 0}) == true);
-        REQUIRE(a.push({-1, -1, 0}) == true);
-        REQUIRE(a.check({0, -1, 0}));
-        REQUIRE(a.check({0, 1, 0}));
+        REQUIRE(a.push({-1.f, 1.f, 0.f}) == true);
+        REQUIRE(a.push({-1.f, -1.f, 0.f}) == true);
+        REQUIRE(a.check({0.f, -1.f, 0.f}));
+        REQUIRE(a.check({0.f, 1.f, 0.f}));
 
-        REQUIRE(a.push({0, 1, 0}));
-        REQUIRE(!a.check({0, -1, 0}));
+        REQUIRE(a.push({0.f, 1.f, 0.f}));
+        REQUIRE(!a.check({0.f, -1.f, 0.f}));
     }
 }
 
@@ -84,12 +84,12 @@ TEST_CASE("Feature::check(Feature)")
     SECTION("Tetrahedron")
     {
         Feature a(Eigen::Vector3f::Zero());
-        REQUIRE(a.push({0, 0,  1}) == true);
-        REQUIRE(a.push({1, 0, -1}) == true);
+        REQUIRE(a.push({0.f, 0.f,  1.f}) == true);
+        REQUIRE(a.push({1.f, 0.f, -1.f}) == true);
 
         Feature b(Eigen::Vector3f::Zero());
-        REQUIRE(b.push({-1,  1, -1}) == true);
-        REQUIRE(b.push({-1, -1, -1}) == true);
+        REQUIRE(b.push({-1.f,  1.f, -1.f}) == true);
+        REQUIRE(b.push({-1.f, -1.f, -1.f}) == true);
 
         REQUIRE(!a.check(b));
     }

@@ -1,0 +1,348 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"IGL",
+				"IGL_STATIC_LIBRARY"
+			],
+			[
+				"fin",
+				"findOrInsertKey"
+			],
+			[
+				"inser",
+				"insertKey"
+			],
+			[
+				"inse",
+				"insertKey"
+			],
+			[
+				"ins",
+				"insertKey"
+			],
+			[
+				"ma",
+				"main\tmain()"
+			]
+		]
+	},
+	"buffers":
+	[
+	],
+	"build_system": "",
+	"build_system_choices":
+	[
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 784.0,
+		"last_filter": "pack",
+		"selected_items":
+		[
+			[
+				"pack",
+				"Package Control: Install Package"
+			],
+			[
+				"mark",
+				"Markdown Preview: Preview in Browser"
+			],
+			[
+				"install",
+				"Package Control: Install Package"
+			],
+			[
+				"vmen",
+				"View: Toggle Menu"
+			],
+			[
+				"inst",
+				"Package Control: Install Package"
+			],
+			[
+				"ins",
+				"Package Control: Install Package"
+			],
+			[
+				"insta",
+				"Package Control: Install Package"
+			],
+			[
+				"packa",
+				"Install Package Control"
+			]
+		],
+		"width": 888.0
+	},
+	"console":
+	{
+		"height": 171.0,
+		"history":
+		[
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"file_history":
+	[
+		"/C/libs/cms-priliminary/MarchingCubes-AutoTest-rev20041130/clipping.cpp",
+		"/C/libs/cms-priliminary/MarchingCubes-AutoTest-rev20041130/d3dapp.cpp",
+		"/C/libs/cms-priliminary/MarchingCubes-AutoTest-rev20041130/DirectX9test2.h",
+		"/C/libs/DP/Code_figures_data/code/build/Release/README.txt",
+		"/C/libs/DP/Code_figures_data/Readme.txt",
+		"/C/libs/cms-priliminary/MarchingCubes-AutoTest-rev20041130/DirectX9test2.cpp",
+		"/C/Program Files/CMake/share/cmake-3.10/Modules/FindCUDA.cmake",
+		"/C/libs/gpuSDF/gpu-dist/build/CMakeCache.txt",
+		"/C/libs/gpuSDF/SDFRenderer/main.cpp",
+		"/C/libs/OpenSubdivExt/glut-3.7/README.win",
+		"/C/libs/OpenSubdivExt/glut-3.7/Portability.txt",
+		"/C/libs/ldni/LDNI Source/common/GL/glut.h",
+		"/C/libs/DP/Code_figures_data/code/extern/libigl/external/embree/tutorials/common/freeglut/include/GL/glut.h",
+		"/C/libs/OpenSubdiv/CMakeLists.txt",
+		"/C/cplusplus/ntop/modules/juce_glm/CMakeLists.txt",
+		"/C/libs/gpuSDF/Converter/CMakeLists.txt.txt",
+		"/C/cplusplus/ntop/apps/curv/CMakeLists.txt",
+		"/C/cplusplus/ntop/apps/ao/CMakeLists.txt",
+		"/C/cplusplus/ntop/apps/curv/CMakeLists - theirs.txt",
+		"/C/cplusplus/ntop/apps/curv/cmd/readlinex.h",
+		"/C/cplusplus/ntop/apps/curv/cmd/readlinex.c",
+		"/C/cplusplus/ntop/apps/curv/cmd/curv.cc",
+		"/C/cplusplus/ntop/apps/curv/cmd/progdir.cc",
+		"/C/cplusplus/ntop/apps/curv/cmd/progdir.h",
+		"/C/cplusplus/ntop/apps/curv/tests/geom.sh",
+		"/C/cplusplus/ntop/apps/ao/libfive/src/CMakeLists.txt",
+		"/C/Users/bradr/Google Drive/NT/NT_Kernel/Roadmaps/Requirements",
+		"/C/libs/libfive/libfive/src/render/discrete/voxels.cpp",
+		"/C/libs/libfive/libfive/src/render/brep/contours.cpp",
+		"/C/libs/DP/Code_figures_data/fig6/run.sh",
+		"/C/cplusplus/ntop/builds/turbo/VertsOut.txt",
+		"/C/libs/libfive/libfive/src/render/brep/xtree.cpp",
+		"/C/Users/bradr/Desktop/Skunkworks/meshes/newKernel/boolean_gyroids4_.csv",
+		"/C/Users/bradr/Desktop/Skunkworks/meshes/newKernel/boolean_gyroids2_X_.csv",
+		"/C/Users/bradr/Desktop/Skunkworks/meshes/newKernel/boolean_gyroids2_X.stl",
+		"/C/libs/DP/Code_figures_data/fig3/run.sh",
+		"/C/cplusplus/ntop/modules/cgal/include/gmp_.h",
+		"/C/libs/DP/Code_figures_data/code/extern/libigl/include/CGAL/Installation/cmake/modules/CGALConfig_install.cmake.in",
+		"/C/libs/DP/Code_figures_data/code/extern/libigl/include/CGAL/Installation/CMakeLists.txt",
+		"/C/libs/DP/Code_figures_data/code/extern/libigl/include/CGAL/_CMakeLists.txt",
+		"/C/libs/DP/Code_figures_data/code/CMakeLists.txt",
+		"/C/Users/bradr/Google Drive/NT/nTopology/updates/20180109_boardMtg#2/sales/SalesNotes--Wallace",
+		"/C/cplusplus/ntop/modules/icarus/kratos/CMakeLists.txt",
+		"/C/cplusplus/ntop/modules/eigen/INSTALL",
+		"/C/cplusplus/ntop/modules/ao/libfive/test/mesh.cpp",
+		"/C/Users/bradr/Downloads/citation-321076296.bib",
+		"/C/cplusplus/ntop/modules/juce_icarus/thirdparty/Quartet/Quartet/util.h",
+		"/C/cplusplus/ntop/modules/juce_icarus/thirdparty/Quartet/Quartet/vec.h",
+		"/C/libs/vcpkg/installed/x64-windows/include/Eigen/Eigen",
+		"/C/cplusplus/ntop/modules/ao/libfive/bind/csg.scm",
+		"/C/cplusplus/ntop/modules/ao/CMakeLists.txt",
+		"/C/libs/vcpkg/installed/x64-windows/include/Eigen/Dense",
+		"/C/cplusplus/ntop/modules/eigen/README.md",
+		"/C/cplusplus/ntop/modules/eigen/CMakeLists.txt",
+		"/C/cplusplus/ntop/apps/turbo/CMakeLists.txt",
+		"/C/cplusplus/ntop/apps/Alpha2/Source/CMakeLists.txt",
+		"/C/libs/LicenseTest/flexnetls-test/bin/tools/ntop/pro.lic",
+		"/C/Users/bradr/Google Drive/NT/nTopology/Design/MVD/MVD_20171111_mtg",
+		"/C/Users/bradr/Desktop/test.csv",
+		"/C/Users/bradr/Google Drive/NT/nTopology/updates/20171106_boardMtg#1/20171106_nt_Board_001.md",
+		"/C/Users/bradr/OneDrive/GEOMETRY/ShelLOpt/params.md",
+		"/C/Users/bradr/Downloads/License_Ugslmd_.txt",
+		"/C/libs/LicenseTest/flexnetls-test/addlic-pro.bat",
+		"/C/libs/LicenseTest/flexnetls-test/bin/tools/ntop/ntop.lic",
+		"/C/cplusplus/ntop/apps/ao/libfive/CMakeLists.txt",
+		"/C/cplusplus/ntop/apps/ao/libfive/include/libfive/render/brep/mesh.hpp",
+		"/C/Users/bradr/Google Drive/NT/nTopology/Peak Performance/fall2017/brainDump.md",
+		"/C/Users/bradr/Dropbox/NT_Data/Company/Investor Updates/NT Updates 1706_text.txt",
+		"/C/libs/matlab/grand_v10/PolyMesher/PolyMesher.m",
+		"/C/libs/matlab/GRAND3_v10/MeshLotteLat.mat",
+		"/S/BACKUP/BRAD/PHOENIX/builds/CERTS/NewSymantec/getting_started.txt",
+		"/C/Users/bradr/AppData/Local/Temp/Temp1_1538039029.zip/getting_started.txt",
+		"/C/Users/bradr/Google Drive/NT/nTopology/REIMBURSEMENTS.md",
+		"/C/Users/bradr/Google Drive/NT/nTopology/REIMBURSEMENTS",
+		"/C/Users/bradr/Google Drive/NT/nTopology/Peak Performance/fall2017/Energy Cheat Sheet",
+		"/C/Users/bradr/Google Drive/NT/nTopology/updates/20171106_boardMtg#1/Stats/HR/OrgCharLocation.txt",
+		"/C/Users/bradr/Downloads/License_Ugslmd.txt",
+		"/C/Program Files/Siemens/PLMLicenseServer/splm8.lic",
+		"/C/Users/bradr/Downloads/License_Ugslmd__.txt",
+		"/C/Program Files/Siemens/NX 12.0/REL_INFO/release_notes/release_notes.ico",
+		"/C/Program Files/Siemens/NX 12.0/REL_INFO/whatsnew/whatsnew.ico",
+		"/C/Users/bradr/Desktop/MeshGeomStats.h",
+		"/C/Users/bradr/Desktop/MeshGeomStats.cpp",
+		"/C/cplusplus/ntop/modules/juce_icarus/icarus/utils/CMakeLists.txt",
+		"/C/cplusplus/ntop/modules/juce_icarus/icarus/meshing/CMakeLists.txt",
+		"/C/cplusplus/ntop/modules/juce_icarus/icarus/modifiers/CMakeLists.txt",
+		"/C/Users/bradr/Downloads/Policy_Export_Gusto (2).csv",
+		"/C/Users/bradr/Desktop/_vimrc",
+		"/C/Users/bradr/Desktop/cat.obj",
+		"/S/SOFTWARE/FEA/SIMULIA 2017/d05099507d83_ABQ23287_0002_1.LIC",
+		"/C/cplusplus/ntop/apps/Alpha2/Source/ToolFactory.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/order_facets_around_edges.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/outer_element.cpp",
+		"/C/libs/libigl/include/igl/decimate.cpp",
+		"/C/libs/libigl/include/igl/decimate.h",
+		"/C/libs/libigl/include/igl/directed_edge_orientations.h",
+		"/C/cplusplus/ntop/modules/juce_icarus/CMakeLists.txt",
+		"/C/cplusplus/ntop/modules/juce_icarus/ntm/CMakeLists.txt",
+		"/C/libs/libigl/include/igl/AABB.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/outer_hull.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/peel_outer_hull_layers.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/remesh_intersections.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/remesh_self_intersections.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/resolve_intersections.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/snap_rounding.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/subdivide_segments.cpp",
+		"/C/libs/libigl/include/igl/crouzeix_raviart_massmatrix.cpp",
+		"/C/libs/libigl/include/igl/cut_mesh.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/outer_facet.cpp",
+		"/C/libs/libigl/include/igl/bbw.cpp",
+		"/C/libs/libigl/include/igl/bbw/bbw.cpp",
+		"/C/libs/libigl/include/igl/components.cpp",
+		"/C/libs/libigl/include/igl/compute_frame_field_bisectors.cpp",
+		"/C/libs/libigl/include/igl/copyleft/cgal/mesh_to_cgal_triangle_list.cpp",
+		"/C/libs/libigl/include/igl/avg_edge_length.cpp",
+		"/C/libs/libigl/include/igl/avg_edge_length.h",
+		"/C/libs/libigl/include/igl/barycenter.cpp",
+		"/C/libs/libigl/include/igl/barycenter.h",
+		"/C/cplusplus/ntop/modules/juce_eigen/CMakeLists.txt",
+		"/C/libs/Eigen/eigen-eigen-5a0156e40feb/Eigen/CMakeLists.txt",
+		"/C/libs/Eigen/eigen-eigen-5a0156e40feb/CMakeLists.txt",
+		"/C/cplusplus/ntop/modules/juce_eigen/eigen3/unsupported/CMakeLists.txt",
+		"/C/libs/Eigen/eigen-eigen-5a0156e40feb/unsupported/CMakeLists.txt",
+		"/C/cplusplus/ntop/modules/juce_eigen/eigen3/Eigen/src/CMakeLists.txt",
+		"/C/cplusplus/ntop/modules/juce_eigen/eigen3/Eigen/src/Core/util/Macros.h",
+		"/C/cplusplus/ntop/modules/juce_eigen/eigen3/Eigen/src/Core/SolveTriangular.h",
+		"/C/cplusplus/ntop/modules/juce_eigen/eigen3/Eigen/Core",
+		"/C/cplusplus/ntop/modules/juce_eigen/eigen3/Eigen/Dense"
+	],
+	"find":
+	{
+		"height": 28.0
+	},
+	"find_in_files":
+	{
+		"height": 134.0,
+		"where_history":
+		[
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"sheets":
+			[
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 28.0
+	},
+	"input":
+	{
+		"height": 0.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": false,
+	"output.find_results":
+	{
+		"height": 0.0
+	},
+	"pinned_build_system": "",
+	"project": "CMakeLists.sublime-project",
+	"replace":
+	{
+		"height": 52.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_symbol":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"selected_group": 0,
+	"settings":
+	{
+	},
+	"show_minimap": true,
+	"show_open_files": false,
+	"show_tabs": true,
+	"side_bar_visible": false,
+	"side_bar_width": 530.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}
