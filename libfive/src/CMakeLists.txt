@@ -16,7 +16,6 @@ ADD_CUSTOM_COMMAND(
 add_library(five ${LINK_TYPE}
     eval/base.cpp
     eval/eval_interval.cpp
-    eval/eval_interval_array.cpp
     eval/eval_jacobian.cpp
     eval/eval_array.cpp
     eval/eval_deriv_array.cpp
@@ -25,6 +24,7 @@ add_library(five ${LINK_TYPE}
     eval/eval_point.cpp
     eval/tape.cpp
     eval/feature.cpp
+    eval/transformed_oracle.cpp
     render/discrete/heightmap.cpp
     render/discrete/voxels.cpp
     render/brep/xtree2.cpp
@@ -36,8 +36,10 @@ add_library(five ${LINK_TYPE}
     solve/solver.cpp
     tree/cache.cpp
     tree/opcode.cpp
-    tree/template.cpp
+    tree/archive.cpp
     tree/tree.cpp
+    tree/oracle_clause.cpp
+    tree/transformed_oracle_clause.cpp
     libfive.cpp
 
     ${CMAKE_CURRENT_BINARY_DIR}/version.c
