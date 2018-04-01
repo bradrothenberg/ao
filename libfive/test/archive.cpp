@@ -47,7 +47,7 @@ public:
         return std::unique_ptr<const OracleClause>(new ST());
     }
 };
-REGISTER_ORACLE_CLAUSE(ST);
+//REGISTER_ORACLE_CLAUSE(ST);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -103,29 +103,29 @@ TEST_CASE("Archive::serialize")
         REQUIRE(out == expected);
     }
 
-    SECTION("With an oracle")
-    {
-        auto a = Archive(Tree(std::unique_ptr<OracleClause>(
-                        new ST())));
-        auto out = a.serialize();
-        std::vector<uint8_t> expected =
-            {'T', '"', '"', '"', '"', Opcode::ORACLE, '"', 'S', 'T', '"', '"', 'h', 'i', '"', 0xFF};
-        REQUIRE(out == expected);
-    }
+//     SECTION("With an oracle")
+//     {
+//         auto a = Archive(Tree(std::unique_ptr<OracleClause>(
+//                         new ST())));
+//         auto out = a.serialize();
+//         std::vector<uint8_t> expected =
+//             {'T', '"', '"', '"', '"', Opcode::ORACLE, '"', 'S', 'T', '"', '"', 'h', 'i', '"', 0xFF};
+//         REQUIRE(out == expected);
+//     }
 }
 
 TEST_CASE("Archive::deserialize")
 {
-    SECTION("Oracle")
-    {
-        std::vector<uint8_t> in =
-                {'T', '"', '"', '"', '"', Opcode::ORACLE, '"', 'S', 'T', '"', '"', 'h', 'i', '"'};
-        auto t = Archive::deserialize(in).shapes.front();
-        REQUIRE(t.tree.id() != nullptr);
-        REQUIRE(t.tree->op == Opcode::ORACLE);
-        REQUIRE(dynamic_cast<const ST*>(t.tree->oracle.get())
-                != nullptr);
-    }
+//     SECTION("Oracle")
+//     {
+//         std::vector<uint8_t> in =
+//                 {'T', '"', '"', '"', '"', Opcode::ORACLE, '"', 'S', 'T', '"', '"', 'h', 'i', '"'};
+//         auto t = Archive::deserialize(in).shapes.front();
+//         REQUIRE(t.tree.id() != nullptr);
+//         REQUIRE(t.tree->op == Opcode::ORACLE);
+//         REQUIRE(dynamic_cast<const ST*>(t.tree->oracle.get())
+//                 != nullptr);
+//     }
 
     SECTION("Complicated")
     {
