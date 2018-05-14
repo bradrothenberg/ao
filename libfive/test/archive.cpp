@@ -47,6 +47,7 @@ public:
         return std::unique_ptr<const OracleClause>(new ST());
     }
 };
+
 //REGISTER_ORACLE_CLAUSE(ST);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -116,6 +117,7 @@ TEST_CASE("Archive::serialize")
 
 TEST_CASE("Archive::deserialize")
 {
+
 //     SECTION("Oracle")
 //     {
 //         std::vector<uint8_t> in =

@@ -14,10 +14,14 @@ set(SRCS main.cpp
     eval_point.cpp
     feature.cpp
     heightmap.cpp
+    interval.cpp
     marching.cpp
     mesh.cpp
+    neighbors.cpp
     oracle.cpp
     region.cpp
+    simplextree.cpp
+    simplex.cpp
     solver.cpp
     tape.cpp
     transformed_oracle.cpp

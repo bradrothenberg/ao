@@ -52,6 +52,7 @@ TEST_CASE("Deduplication of NaN")
 
     auto cx = t->constant(1);
     auto ca = t->constant(NAN);
+
     auto cb = t->constant(std::nanf(""));
     auto cy = t->constant(2);
 
