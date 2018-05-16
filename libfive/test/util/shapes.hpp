@@ -30,6 +30,7 @@ Kernel::Tree OpMix(Kernel::Tree tA, Kernel::Tree tB, float a);
 Kernel::Tree rectangle(float xmin, float xmax, float ymin, float ymax,
                        Eigen::Matrix4f M=Eigen::Matrix4f::Identity());
 Kernel::Tree menger(int i);
+Kernel::Tree menger2d(int i);
 Kernel::Tree circle(float r);
 Kernel::Tree sphere(float r, Eigen::Vector3f center=Eigen::Vector3f::Zero());
 Kernel::Tree box(const Eigen::Vector3f& lower, const Eigen::Vector3f& upper);
@@ -56,7 +57,7 @@ Kernel::Tree offset(Kernel::Tree t, float r);
 Kernel::Tree shell(Kernel::Tree t, float r);
 
 //clearence: make sure A clears B by amount R
-//Expands Tb by r & then subtracts it from A 
+//Expands Tb by r & then subtracts it from A
 Kernel::Tree clearence(Kernel::Tree tA, Kernel::Tree tB, float r);
 
 //blend: blends tA with tB by r
@@ -64,11 +65,12 @@ Kernel::Tree blend(Kernel::Tree tA, Kernel::Tree tB, float r);
 
 //loft: creates a surface between tA & tB in the z-Axis from zMin to zMax
 Kernel::Tree loft(Kernel::Tree tA, Kernel::Tree tB, float zMin, float zMax);
-Kernel::Tree loftBetween(Kernel::Tree tA, 
-                         Kernel::Tree tB, 
-                         const Eigen::Vector3f& lower, 
+Kernel::Tree loftBetween(Kernel::Tree tA,
+                         Kernel::Tree tB,
+                         const Eigen::Vector3f& lower,
                          const Eigen::Vector3f& upper);
 
 
 //Transforms
 //Scale, Rotate, Move, Shear etc...
+Kernel::Tree gyroid2d(float period, float thickness);

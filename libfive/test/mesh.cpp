@@ -104,6 +104,7 @@ TEST_CASE("Mesh::render (performance)")
     // Begin timekeeping
     start = std::chrono::system_clock::now();
     auto mesh = Mesh::render(sponge, r, 0.1);
+
     end = std::chrono::system_clock::now();
 
     elapsed = end - start;
@@ -273,7 +274,7 @@ TEST_CASE("Mesh::generate (schwartz)")
  auto scale = .125f;
  auto radius = 1.5f;
 
- 
+
  auto sphere1 = sphere(3.0f, { 0.f,0.f,0.f });
 
  Kernel::Tree box = max(max(max(max(max(Kernel::Tree::X() - radius, -Kernel::Tree::X() - radius),
@@ -284,21 +285,21 @@ TEST_CASE("Mesh::generate (schwartz)")
 
 
  Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
- 
+
  // Begin timekeeping
   start = std::chrono::system_clock::now();
  auto mesh = Mesh::render(boxschwarz, r, 0.05);
   end = std::chrono::system_clock::now();
- 
+
   elapsed = end - start;
- 
+
  auto elapsed_ms =
  std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
- 
+
  std::string log = "\nMade schwartz in " +
  std::to_string(elapsed.count()) + " sec";
  WARN(log);
- 
+
  mesh->saveSTL("schwartzBlnX.stl");
 
 }

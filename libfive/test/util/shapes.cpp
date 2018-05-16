@@ -70,7 +70,7 @@ Kernel::Tree CSGUnionRound(Kernel::Tree tA, Kernel::Tree tB, float r)
 
   auto u0 = max(vc0, 0.f);
   auto u1 = max(vc1, 0.f);
-   
+
   auto len = sqrt(square(u0) + square(u1));
 
   return max(r, min(tA, tB)) - len;
@@ -104,22 +104,22 @@ Kernel::Tree clearence(Kernel::Tree tA, Kernel::Tree tB, float r)
 
 Kernel::Tree blend(Kernel::Tree tA, Kernel::Tree tB, float r)
 {
-  return CSGUnion(tA, 
+  return CSGUnion(tA,
                   CSGUnion(tB, (sqrt(abs(tA)) + sqrt(abs(tB))) - r));
 }
 
 Kernel::Tree loft(Kernel::Tree tA, Kernel::Tree tB, float zMin, float zMax)
 {
-  return max(max((Tree::Z() - zMax), 
+  return max(max((Tree::Z() - zMax),
                  (zMin - Tree::Z())),
-             (((Tree::Z() - zMin)*tB) + 
-             ((zMax - Tree::Z())*tA)) 
+             (((Tree::Z() - zMin)*tB) +
+             ((zMax - Tree::Z())*tA))
              / (zMax - zMin));
 }
 
-Kernel::Tree loftBetween(Kernel::Tree tA, 
-                         Kernel::Tree tB, 
-                         const Eigen::Vector3f& lower, 
+Kernel::Tree loftBetween(Kernel::Tree tA,
+                         Kernel::Tree tB,
+                         const Eigen::Vector3f& lower,
                          const Eigen::Vector3f& upper)
 {
   auto x = Tree::X();
@@ -196,6 +196,22 @@ Tree menger(int i)
     return max(cube, cutout);
 }
 
+Tree menger2d(int i)
+{
+    Eigen::Matrix3f m = Eigen::Matrix3f::Identity();
+    Eigen::Matrix4f M = Eigen::Matrix4f::Zero();
+    M.block<3,3>(0,0) = m;
+    Tree a = recurse(0, 0, 1, M, i);
+
+    auto square = max(
+                    max(-(Tree::X() + 1.5),
+                          Tree::X() - 1.5),
+                    max(-(Tree::Y() + 1.5),
+                          Tree::Y() - 1.5));
+
+    return max(square, -a);
+}
+
 Tree circle(float r)
 {
     return sqrt(square(Tree::X()) + square(Tree::Y())) - r;
@@ -219,8 +235,19 @@ Tree box(const Eigen::Vector3f& lower, const Eigen::Vector3f& upper)
                    Tree::Z() - upper.z()));
 }
 
-Tree CylinderYAxis(Eigen::Vector3f start, float r) {   
-  return r*r 
-    - square(Tree::X() - start.x()) 
+Tree CylinderYAxis(Eigen::Vector3f start, float r) {
+  return r*r
+    - square(Tree::X() - start.x())
     - square(Tree::Z() - start.z());
+}
+Tree gyroid2d(float period, float thickness)
+{
+    auto tau = 3.14159 * 2;
+    auto x_factor = tau / period;
+    auto y_factor = tau / period;
+
+    auto x = Tree::X();
+    auto y = Tree::Y();
+
+    return sin(x / x_factor) * cos(y / y_factor) - thickness;
 }

@@ -32,6 +32,10 @@ add_library(five ${LINK_TYPE}
     render/brep/contours.cpp
     render/brep/mesh.cpp
     render/brep/marching.cpp
+    render/brep/neighbors.cpp
+    render/simplex/simplextree2.cpp
+    render/simplex/simplextree3.cpp
+    render/simplex/walk2d.cpp
     solve/bounds.cpp
     solve/solver.cpp
     tree/cache.cpp
