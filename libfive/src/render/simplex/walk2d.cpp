@@ -51,6 +51,14 @@ void cell(std::unique_ptr<SimplexTree<2>>& t, Region<2> region, unsigned depth,
 template <Axis::Axis A>
 void edge2(const std::array<SimplexTree<2>*, 2>& ts, RunData& data)
 {
+    if (A == Axis::X)
+    {
+        assert(ts[0]->region.upper.y() == ts[1]->region.lower.y());
+    }
+    else if (A == Axis::Y)
+    {
+        assert(ts[0]->region.upper.x() == ts[1]->region.lower.x());
+    }
     assert(ts[0]->type != Interval::UNKNOWN);
     assert(ts[1]->type != Interval::UNKNOWN);
 
@@ -65,15 +73,7 @@ void edge2(const std::array<SimplexTree<2>*, 2>& ts, RunData& data)
         return;
     }
 
-    // Continue recursing if either tree is a branch node.
-    if (std::any_of(ts.begin(), ts.end(),
-        [](const SimplexTree<2>* t){ return t->isBranch(); }))
-    {
-        edge2<A>({{ts[0]->child(perp), ts[1]->child(0)}}, data);
-        edge2<A>({{ts[0]->child(A|perp), ts[1]->child(A)}}, data);
-        return;
-    }
-
+    // Refine trees and recall edge2 if either tree is incomplete
     if (std::any_of(ts.begin(), ts.end(),
         [](const SimplexTree<2>* t){ return !t->complete; }))
     {
@@ -85,6 +85,15 @@ void edge2(const std::array<SimplexTree<2>*, 2>& ts, RunData& data)
             }
         }
         edge2<A>(ts, data);
+        return;
+    }
+
+    // Continue recursing if either tree is a branch node.
+    if (std::any_of(ts.begin(), ts.end(),
+        [](const SimplexTree<2>* t){ return t->isBranch(); }))
+    {
+        edge2<A>({{ts[0]->child(perp), ts[1]->child(0)}}, data);
+        edge2<A>({{ts[0]->child(A|perp), ts[1]->child(A)}}, data);
         return;
     }
 
@@ -152,7 +161,7 @@ void edge2(const std::array<SimplexTree<2>*, 2>& ts, RunData& data)
         {{2, 0, 2, 1}}, // 2
         {{0, 1, 2, 1}}, // 2 + 0
         {{2, 0, 1, 0}}, // 2 + 1
-        {{0, 0, 0, 0}} // All filled (invalid)
+        {{0, 0, 0, 0}}  // All filled (invalid)
     }};
 
     for (const auto& t : tris)
@@ -219,6 +228,22 @@ void recurse(SimplexTree<2>* t, RunData& data)
         cell(t->children[i], subregions[i], t->depth + 1, data);
     }
 
+    // Attempt to refine the interval type of the parent tree,
+    // because interval arithemtic gets more precise on smaller
+    // regions and we may be able to prove that it is empty / filled.
+    if (t->type == Interval::AMBIGUOUS)
+    {
+        bool all_filled = true;
+        bool all_empty = true;
+        for (const auto& c : t->children)
+        {
+            all_filled &= (c->type == Interval::FILLED);
+            all_empty &=  (c->type == Interval::EMPTY);
+        }
+        t->type = all_filled ? Interval::FILLED :
+                  all_empty  ? Interval::EMPTY  : t->type;
+    }
+
     //  Then, call edge on every pair of cells
     edge2<Axis::Y>({{t->child(0), t->child(Axis::X)}}, data);
     edge2<Axis::Y>({{t->child(Axis::Y), t->child(Axis::Y | Axis::X)}}, data);
@@ -229,21 +254,21 @@ void recurse(SimplexTree<2>* t, RunData& data)
 void refine(SimplexTree<2>* t, RunData& data)
 {
     const auto err = t->findVertices(data.eval);
-    if (err > data.max_err && t->depth < data.max_depth)
+    if (err > data.max_err && t->depth < data.max_depth && !t->isBranch())
     {
         recurse(t, data);
     }
     else
     {
         t->checkVertices(data.eval);
-        t->complete = true;
     }
+    t->complete = true;
 }
 
 void cell(std::unique_ptr<SimplexTree<2>>& t, Region<2> region, unsigned depth,
           RunData& data)
 {
-    assert(t->get() == nullptr);
+    assert(t.get() == nullptr);
     t.reset(new SimplexTree<2>(data.eval, region, depth));
     assert(t->type != Interval::UNKNOWN);
 

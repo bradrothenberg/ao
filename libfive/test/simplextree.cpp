@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "libfive/render/simplex/simplextree.hpp"
 #include "libfive/render/simplex/simplex.hpp"
 #include "libfive/render/brep/eval_xtree.hpp"
+#include "libfive/render/simplex/walk2d.hpp"
 #include "util/shapes.hpp"
 
 using namespace Kernel;
@@ -85,11 +86,9 @@ TEST_CASE("SimplexTree<2>: Vertex placement")
     auto eval = XTreeEvaluator(s);
     Region<2> r({-2, -2}, {2, 2});
 
-    auto t = SimplexTree<2>(&eval, r);
-    t.findVertices(&eval);
-    t.checkVertices(&eval);
+    auto contours = walk2d(&eval, r, 2, 4, 0.0001);
 
-    for (auto t : leafs(&t))
+    for (auto t : leafs(contours.second.get()))
     {
         if (t->type != Interval::AMBIGUOUS)
         {
@@ -120,19 +119,61 @@ TEST_CASE("SimplexTree<2>: Vertex placement")
     }
 }
 
+
+TEST_CASE("SimplexTree<2>: Vertex error")
+{
+    auto s = circle(1);
+    auto eval = XTreeEvaluator(s);
+
+    {   // Any point on the circle that doesn't contain the center
+        // will be error-full.
+        auto t = SimplexTree<2>(&eval, {{1, 1}, {2, 2}});
+        auto err = t.findVertices(&eval);
+        CAPTURE(err);
+        REQUIRE(err > 1e-6);
+    }
+
+    {   // A circle can have low error at the center
+        auto t = SimplexTree<2>(&eval, {{-1, -1}, {2, 2}});
+        auto err = t.findVertices(&eval);
+        CAPTURE(err);
+        REQUIRE(err < 1e-6);
+    }
+}
+
+TEST_CASE("SimplexTree<2>: Max depth")
+{
+    auto s = circle(1);
+    auto eval = XTreeEvaluator(s);
+
+
+    auto contours = walk2d(&eval, {{-2, -2}, {2, 2}}, 2, 4, 0.0001);
+    unsigned max_depth = 0;
+
+    for (auto t : leafs(contours.second.get()))
+    {
+        if (t->type != Interval::AMBIGUOUS)
+        {
+            continue;
+        }
+        max_depth = std::max(max_depth, t->depth);
+    }
+    REQUIRE(max_depth == 4);
+}
+
 #include "libfive/render/discrete/heightmap.hpp"
-#include "libfive/render/simplex/walk2d.hpp"
 #include "libfive/render/brep/contours.hpp"
 TEST_CASE("SimplexTree<2>: SVG debugging")
 {
     //auto s = move(circle(1), {0.0, 0.1, 0.0});
     //auto s = move(max(Tree::X(), Tree::Y()), {0.0, 0.1, 0});
     //auto s = max(circle(1), gyroid2d(50, 0.1));
-    auto s = max(circle(1), -circle(0.9));
+    //auto s = max(circle(1), -circle(0.9));
     //auto s = Tree::Y();
+    auto s = menger2d(1);
 
     auto eval = XTreeEvaluator(s);
-    Region<2> r({-2, -2}, {2, 2});
+    Region<2> r({-2.1, -2.1}, {2, 2});
 
 
     std::chrono::time_point<std::chrono::system_clock> start, end;
@@ -142,9 +183,9 @@ TEST_CASE("SimplexTree<2>: SVG debugging")
 
     for (unsigned i=0; i < 20; ++i)
     {
-        auto contours = walk2d(&eval, r, 2, 4, 0.0001);
+        //auto contours = walk2d(&eval, r, 2, 4, 0.0001);
     }
-    auto out = walk2d(&eval, r, 2, 4, 0.0001);
+    auto out = walk2d(&eval, r, 2, 5, 0.0001);
     auto contours = out.first;
     auto& t = out.second;
     end = std::chrono::system_clock::now();
@@ -163,6 +204,17 @@ TEST_CASE("SimplexTree<2>: SVG debugging")
 
     for (auto next : leafs(t.get()))
     {
+        if (next->type == Interval::FILLED || next->type == Interval::EMPTY)
+        {
+            auto v = next->region.center();
+            auto fill = (next->type == Interval::FILLED ? "white" : "black");
+            auto stroke = (next->type == Interval::FILLED ? "black" : "white");
+            file << "<circle cx=\"" << v.x() - r.lower.x() << "\" "
+                 << "cy=\"" << r.upper.y() - v.y() << "\" "
+                 << "r=\"0.04\" stroke-width=\"0.01\" stroke=\"" << stroke << "\" "
+                 << "fill=\"" << fill << "\" />\n";
+        }
+
         if (!next->complete) continue;
         for (unsigned i=0; i < next->vertices.cols(); ++i)
         {
@@ -230,7 +282,7 @@ TEST_CASE("SimplexTree<2>: SVG debugging")
 
 
     Voxels v(r.lower3().template cast<float>(),
-             r.upper3().template cast<float>(), {150, 150, 0});
+             r.upper3().template cast<float>(), {350, 350, 0});
     std::atomic_bool abort(false);
     Heightmap::render(s, v, abort)->savePNG("out.png");
 
@@ -239,7 +291,7 @@ TEST_CASE("SimplexTree<2>: SVG debugging")
     start = std::chrono::system_clock::now();
     for (unsigned i=0; i < 20; ++i)
     {
-        auto c = Contours::render(s, r, 0.2);
+        auto c = Contours::render(s, r, 0.26);
     }
     auto c = Contours::render(s, r, 0.2);
     end = std::chrono::system_clock::now();
