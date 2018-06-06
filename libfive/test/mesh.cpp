@@ -103,7 +103,6 @@ TEST_CASE("Mesh::render (performance)")
 
     // Begin timekeeping
     start = std::chrono::system_clock::now();
-    mesh->saveSTL("out.stl");
 
     end = std::chrono::system_clock::now();
 

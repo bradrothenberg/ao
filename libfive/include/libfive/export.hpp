@@ -22,7 +22,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #ifdef FIVE_DLL
 #define FIVE_EXPORT __declspec(dllexport)
 #else
-#define FIVE_EXPORT __declspec(dllimport)
+#define FIVE_EXPORT
 #endif
 #else
 #define FIVE_EXPORT
