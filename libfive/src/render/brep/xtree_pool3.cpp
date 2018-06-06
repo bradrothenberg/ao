@@ -1,6 +1,6 @@
 /*
 libfive: a CAD kernel for modeling with implicit functions
-Copyright (C) 2017  Matt Keeter
+Copyright (C) 2018  Matt Keeter
 
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public
@@ -16,21 +16,12 @@ You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
-#pragma once
-
-#include "libfive/render/brep/region.hpp"
-#include "libfive/eval/eval_interval.hpp"
+#include "xtree_pool.cpp"
 
 namespace Kernel {
 
-#ifdef ENABLE_FIND_BOUNDS_EXPERIMENTAL
-Region<3> findBounds(const Tree& t);
-Region<3> findBounds(const Tree& t, const std::map<Tree::Id, float>& vars);
-Region<3> findBounds(IntervalEvaluator* eval);
-#else
-#error \
-The findBounds API is experimental and only works for the simplest of shapes. \
-If you still want to use it, please #define ENABLE_FIND_BOUNDS_EXPERIMENTAL.
-#endif
+// Explicit initialization of template
+template struct XTreePool<3>;
 
 }   // namespace Kernel
+

@@ -17,18 +17,20 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "libfive/eval/eval_deriv_array.hpp"
+#include "libfive/eval/deck.hpp"
+#include "libfive/eval/tape.hpp"
 
 namespace Kernel {
 
-DerivArrayEvaluator::DerivArrayEvaluator(std::shared_ptr<Tape> t)
-    : DerivArrayEvaluator(t, std::map<Tree::Id, float>())
+DerivArrayEvaluator::DerivArrayEvaluator(std::shared_ptr<Deck> d)
+    : DerivArrayEvaluator(d, std::map<Tree::Id, float>())
 {
     // Nothing to do here
 }
 
 DerivArrayEvaluator::DerivArrayEvaluator(
-        std::shared_ptr<Tape> t, const std::map<Tree::Id, float>& vars)
-    : ArrayEvaluator(t, vars), d(tape->num_clauses + 1, 1)
+        std::shared_ptr<Deck> deck, const std::map<Tree::Id, float>& vars)
+    : ArrayEvaluator(deck, vars), d(deck->num_clauses + 1, 1)
 {
     // Initialize all derivatives to zero
     for (Eigen::Index i=0; i < d.rows(); ++i)
@@ -37,16 +39,55 @@ DerivArrayEvaluator::DerivArrayEvaluator(
     }
 
     // Load immutable derivatives for X, Y, Z
-    d(tape->X).row(0) = 1;
-    d(tape->Y).row(1) = 1;
-    d(tape->Z).row(2) = 1;
+    d(deck->X).row(0) = 1;
+    d(deck->Y).row(1) = 1;
+    d(deck->Z).row(2) = 1;
+}
+
+Eigen::Block<decltype(DerivArrayEvaluator::ambig), 1, Eigen::Dynamic>
+DerivArrayEvaluator::getAmbiguousDerivs(size_t i)
+{
+    return getAmbiguousDerivs(i, deck->tape);
+}
+
+Eigen::Block<decltype(DerivArrayEvaluator::ambig), 1, Eigen::Dynamic>
+DerivArrayEvaluator::getAmbiguousDerivs(size_t i, Tape::Handle tape)
+{
+    // Reset the ambiguous array to all false
+    ambig = false;
+
+    bool abort = false;
+    tape->walk(
+        [&](Opcode::Opcode op, Clause::Id /* id */, Clause::Id a, Clause::Id b)
+        {
+            if (op == Opcode::ORACLE)
+            {
+                deck->oracles[a]->checkAmbiguous(ambig.head(i));
+            }
+            else if (op == Opcode::OP_MIN || op == Opcode::OP_MAX)
+            {
+                ambig.head(i) = ambig.head(i) ||
+                    ((f.block(a, 0, 1, i) ==
+                      f.block(b, 0, 1, i)) &&
+                      (d(a).leftCols(i) != d(b).leftCols(i)).colwise().sum());
+            }
+        }, abort);
+
+    return ambig.head(i);
+
 }
 
 Eigen::Block<decltype(DerivArrayEvaluator::out), 4, Eigen::Dynamic>
 DerivArrayEvaluator::derivs(size_t count)
 {
+    return derivs(count, deck->tape);
+}
+
+Eigen::Block<decltype(DerivArrayEvaluator::out), 4, Eigen::Dynamic>
+DerivArrayEvaluator::derivs(size_t count, Tape::Handle tape)
+{
     // Perform value evaluation, copying results into the 4th row of out
-    out.row(3).head(count) = values(count);
+    out.row(3).head(count) = values(count, tape);
 
     // Perform derivative evaluation, copying results into the out array
     out.topLeftCorner(3, count) = d(tape->rwalk(*this)).leftCols(count);
@@ -168,7 +209,7 @@ void DerivArrayEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
             break;
 
         case Opcode::ORACLE:
-            tape->oracles[a_]->evalDerivArray(od);
+            deck->oracles[a_]->evalDerivArray(od);
             break;
 
         case Opcode::INVALID:

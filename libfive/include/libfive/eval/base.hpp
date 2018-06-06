@@ -17,25 +17,23 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #pragma once
-#include "libfive/eval/tape.hpp"
+
+#include <map>
+#include <memory>
+
+#include "libfive/tree/tree.hpp"
 
 namespace Kernel {
+class Deck; /*  Forward declaration */
 
 class BaseEvaluator
 {
 public:
-    BaseEvaluator(std::shared_ptr<Tape> t,
+    BaseEvaluator(std::shared_ptr<Deck> deck,
                   const std::map<Tree::Id, float>& vars);
 
-    /*
-     *  Pops the tape
-     *  (must be paired against evalAndPush)
-     */
-    void pop() { tape->pop(); }
-
 protected:
-    std::shared_ptr<Tape> tape;
-
+    std::shared_ptr<Deck> deck;
 };
 
 }   // namespace Kernel

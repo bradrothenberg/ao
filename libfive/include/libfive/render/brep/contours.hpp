@@ -25,8 +25,13 @@ namespace Kernel {
 
 class Contours {
 public:
-    static std::unique_ptr<Contours> render(const Tree t, const Region<2>& r,
-                                            double min_feature=0.1);
+    /*
+     *  Basic render function
+     */
+    static std::unique_ptr<Contours> render(
+            const Tree t, const Region<2>& r,
+            double max_err=1e-8, double min_feature=0.1,
+            bool multithread=true);
 
     /*
      *  Saves the contours to an SVG file

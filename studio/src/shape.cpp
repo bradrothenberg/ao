@@ -19,7 +19,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "studio/shape.hpp"
 #include "studio/shader.hpp"
 
-#include "libfive/solve/bounds.hpp"
+#include "libfive/eval/tape.hpp"
 
 const int Shape::MESH_DIV_EMPTY;
 const int Shape::MESH_DIV_ABORT;
@@ -280,12 +280,13 @@ void Shape::setHover(bool h)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-Kernel::JacobianEvaluator* Shape::dragFrom(const QVector3D& v)
+std::pair<Kernel::JacobianEvaluator*, Kernel::Tape::Handle>
+Shape::dragFrom(const QVector3D& v)
 {
     auto e = new Kernel::JacobianEvaluator(
-            std::make_shared<Kernel::Tape>(tree), vars);
-    e->evalAndPush({v.x(), v.y(), v.z()});
-    return e;
+            std::make_shared<Kernel::Deck>(tree), vars);
+    auto o = e->evalAndPush({v.x(), v.y(), v.z()});
+    return std::make_pair(e, o.second);
 }
 
 void Shape::deleteLater()
@@ -358,26 +359,9 @@ Shape::BoundedMesh Shape::renderMesh(QPair<Settings, int> s)
 {
     cancel.store(false);
 
-    // Use the global bounds settings by default, but try to solve for more
-    // precise bounds if autobounds is true.
+    // Use the global bounds settings
     Kernel::Region<3> r({s.first.min.x(), s.first.min.y(), s.first.min.z()},
                         {s.first.max.x(), s.first.max.y(), s.first.max.z()});
-    if (s.first.autobounds)
-    {
-        auto r_ = Kernel::findBounds(&es[0].interval);
-        if (!r_.lower.isNaN().any() &&
-            !r_.upper.isNaN().any() &&
-            ((r_.upper - r_.lower).array() / (r.upper - r.lower).array())
-                .abs().maxCoeff() < 1000)
-        {
-            r = r_;
-
-            // Add a little padding for numerical safety
-            Kernel::Region<3>::Pt diff = r.upper - r.lower;
-            r.lower -= diff / 10;
-            r.upper += diff / 10;
-        }
-    }
     auto m = Kernel::Mesh::render(es.data(), r,
             1 / (s.first.res / (1 << s.second)),
             pow(10, -s.first.quality), cancel);

@@ -31,8 +31,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "libfive/render/discrete/voxels.hpp"
 #include "libfive/render/discrete/heightmap.hpp"
 
-#include "libfive/solve/bounds.hpp"
-
 using namespace Kernel;
 
 void libfive_contours_delete(libfive_contours* cs)
@@ -163,13 +161,13 @@ libfive_tree libfive_tree_remap(libfive_tree p, libfive_tree x, libfive_tree y, 
 
 float libfive_tree_eval_f(libfive_tree t, libfive_vec3 p)
 {
-    PointEvaluator e(std::make_shared<Tape>(*t));
+    PointEvaluator e(std::make_shared<Deck>(*t));
     return e.eval({p.x, p.y, p.z});
 }
 
 libfive_interval libfive_tree_eval_r(libfive_tree t, libfive_region3 r)
 {
-    IntervalEvaluator e(std::make_shared<Tape>(*t));
+    IntervalEvaluator e(std::make_shared<Deck>(*t));
     auto i = e.eval({r.X.lower, r.Y.lower, r.Z.lower},
                     {r.X.upper, r.Y.upper, r.Z.upper});
     return {i.lower(), i.upper()};
@@ -177,7 +175,7 @@ libfive_interval libfive_tree_eval_r(libfive_tree t, libfive_region3 r)
 
 libfive_vec3 libfive_tree_eval_d(libfive_tree t, libfive_vec3 p)
 {
-    DerivEvaluator e(std::make_shared<Tape>(*t));
+    DerivEvaluator e(std::make_shared<Deck>(*t));
     auto v = e.deriv({p.x, p.y, p.z});
     return {v.x(), v.y(), v.z()};
 }
@@ -185,14 +183,6 @@ libfive_vec3 libfive_tree_eval_d(libfive_tree t, libfive_vec3 p)
 bool libfive_tree_eq(libfive_tree a, libfive_tree b)
 {
     return *a == *b;
-}
-
-libfive_region3 libfive_tree_bounds(libfive_tree a)
-{
-    auto bs = findBounds(*a);
-    return {{float(bs.lower.x()), float(bs.upper.x())},
-            {float(bs.lower.y()), float(bs.upper.y())},
-            {float(bs.lower.z()), float(bs.upper.z())}};
 }
 
 char* libfive_tree_print(libfive_tree t)

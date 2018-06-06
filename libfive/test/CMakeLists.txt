@@ -4,6 +4,7 @@ set(SRCS main.cpp
     bounds.cpp
     cache.cpp
     contours.cpp
+    deck.cpp
     dual.cpp
     eval_interval.cpp
     eval_jacobian.cpp
@@ -23,7 +24,6 @@ set(SRCS main.cpp
     simplextree.cpp
     simplex.cpp
     solver.cpp
-    tape.cpp
     transformed_oracle.cpp
     tree.cpp
     voxels.cpp
