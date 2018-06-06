@@ -17,7 +17,7 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 |#
 (use-modules (ice-9 sandbox) (ice-9 textual-ports) (libfive kernel)
-             (rnrs io ports) (system vm frame))
+             (libfive vec) (rnrs io ports) (system vm frame))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -38,7 +38,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
              (pos (list line start end)))
         (when (not (number? value))
           (error "Invalid variable literal" value))
-        (hash-set! vars (tree-id var) (list '() var value pos))
+        (hash-set! vars (shape-tree-id var) (list '() var value pos))
         var)))
     (interaction-environment)))
   (cons #\- integer-chars))
@@ -50,11 +50,13 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 (define-public sandbox-bindings
   (append (list (cons '(libfive kernel) libfive-bindings)
+                (cons '(guile) '(inexact->exact))
           (get-bindings '(libfive vec))
           (get-bindings '(libfive shapes))
           (get-bindings '(libfive csg))
           (get-bindings '(libfive transforms))
-          (get-bindings '(libfive text)))
+          (get-bindings '(libfive text))
+          (get-bindings '(libfive util)))
     all-pure-bindings))
 
 (define* (sandbox-backtrace stack #:optional (port #t))
@@ -102,15 +104,15 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
               (vector-set! d i res)))
           (loop (1+ i))))
        #f)
-    ((and (tree? d) (var? d))
-      (let ((id (tree-id d))
+    ((and (shape? d) (var? d))
+      (let ((id (shape-tree-id d))
             (var (hash-ref prev addr)))
         (if var ; If there's a matching previous var, use it
           (let* ((prev (hash-ref vars id))
                  (value (caddr prev))
                  (pos (cadddr prev)))
             (hash-remove! vars id)
-            (hash-set! vars (tree-id var) (list addr var value pos))
+            (hash-set! vars (shape-tree-id var) (list addr var value pos))
             var)
           (begin
             (set-car! (hash-ref vars id) addr)
@@ -119,6 +121,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 ))
 
 (define-public (eval-sandboxed str)
+  (read-enable 'curly-infix)
+  (read-disable 'square-brackets)
   (let ((mod (make-sandbox-module sandbox-bindings))
         (in (open-input-string str))
         (failed #f)
@@ -126,6 +130,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
         (prev-vars (make-hash-table)))
     (hash-map->list (lambda (k v) (hash-set! prev-vars (car v) (cadr v))) vars)
     (hash-clear! vars)
+    (eval '(define $bracket-list$ vec-constructor) mod)
     (let loop ((i 0))
       ;; Attempt to read the next clause, storing text location
       (let ((before (cons (port-line in) (port-column in)))

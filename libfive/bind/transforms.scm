@@ -62,6 +62,28 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 (export reflect-x reflect-y reflect-z)
 
+(define-public (symmetric-x shape)
+  "symmetric-x shape
+  Clip the given shape at the x origin,
+  and duplicate the remaining shape reflected
+  on the other side of the origin"
+  (remap-shape (shape x y z) (abs x) y z)
+)
+(define-public (symmetric-y shape)
+  "symmetric-y shape
+  Clip the given shape at the y origin,
+  and duplicate the remaining shape reflected
+  on the other side of the origin"
+  (remap-shape (shape x y z) x (abs y) z)
+)
+(define-public (symmetric-z shape)
+  "symmetric-z shape
+  Clip the given shape at the z origin,
+  and duplicate the remaining shape reflected
+  on the other side of the origin"
+  (remap-shape (shape x y z) x y (abs z))
+)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Scaling
 (define* (scale-x shape sx #:optional (x0 0))
@@ -165,11 +187,12 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
     y z))
 (export shear-x-y)
 
-(define-public (repel shape locus r)
-  "repel shape #[x0 y0 z0] radius
-  Repels the shape away from a point based upon a radius r"
+(define* (repel shape locus r #:optional (e 1))
+  "repel shape #[x0 y0 z0] radius [exaggeration]
+  Repels the shape away from a point based upon a radius r,
+  with optional exaggeration e"
   (define (falloff point)
-    (- 1 (exp (- (/ (norm point) r)))))
+    (- 1 (* e (exp (- (/ (norm point) r))))))
   (let ((shapep (move shape (- locus))))
     (move
      (remap-shape
@@ -181,12 +204,14 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
      locus)
     )
   )
+(export repel)
 
-(define-public (attract shape locus r)
-  "attract shape #[x0 y0 z0] radius
-  Attracts the shape towards a point based upon a radius r"
+(define* (attract shape locus r #:optional (e 1))
+  "attract shape #[x0 y0 z0] radius [exaggeration]
+  Attracts the shape towards a point based upon a radius r,
+  with optional exaggeration e"
   (define (falloff point)
-    (+ 1 (exp (- (/ (norm point) r)))))
+    (+ 1 (* e (exp (- (/ (norm point) r))))))
   (let ((shapep (move shape (- locus))))
     (move
      (remap-shape
@@ -198,6 +223,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
      locus)
     )
   )
+(export attract)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -210,3 +236,104 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
     (remap-shape (shape x y z)
       (- (sqrt (+ (square x) (square z)))) y z)))
 (export revolve-y)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Twirls
+
+(define (generic-centered-twirl-x shape a r vecmaker)
+  (define (falloff point) (exp (- (/ (norm point) r))) )
+  (define (fa op a point) (op (* a (falloff point))) )
+  (remap-shape shape (x y z)
+    x
+    (+
+      (* (fa cos a (vecmaker x y z)) y)
+      (* (fa sin a (vecmaker x y z)) z)
+    )
+    (+
+      (* (- (fa sin a (vecmaker x y z))) y)
+      (*    (fa cos a (vecmaker x y z))  z)
+    )
+  )
+)
+
+(define (centered-twirl-x shape a r)
+  (generic-centered-twirl-x shape a r vec3)
+)
+
+(define (centered-twirl-axis-x shape a r)
+  (generic-centered-twirl-x shape a r (lambda (x y z) (vec2 y z)))
+)
+
+(define (generic-twirl-n shape a r center method axisremap)
+  (sequence
+    shape
+    (move (- center))
+    (axisremap)
+    (method a r)
+    (axisremap)
+    (move center)
+  )
+)
+
+(define (generic-twirl-x shape a r center method)
+  (generic-twirl-n shape a r center method (lambda (subshape) subshape))
+)
+
+(define (generic-twirl-y shape a r center method)
+  (generic-twirl-n shape a r center method reflect-xy)
+)
+
+(define (generic-twirl-z shape a r center method)
+  (generic-twirl-n shape a r center method reflect-xz)
+)
+
+(define* (twirl-x shape a r #:optional (center #[0 0 0]))
+  "twirl-x shape amount radius [center]
+  Twirls the shape in the x axis
+  around the optional center point"
+  (generic-twirl-x shape a r center centered-twirl-x)
+)
+(export twirl-x)
+
+(define* (twirl-axis-x shape a r #:optional (center #[0 0 0]))
+  "twirl-axis-x shape amount radius [center]
+  Twirls the shape in the x axis
+  around the line extending from
+  the center point"
+  (generic-twirl-x shape a r center centered-twirl-axis-x)
+)
+(export twirl-axis-x)
+
+(define* (twirl-y shape a r #:optional (center #[0 0 0]))
+  "twirl-y shape amount radius [center]
+  Twirls the shape in the y axis
+  around the optional center point"
+  (generic-twirl-y shape a r center centered-twirl-x)
+)
+(export twirl-y)
+
+(define* (twirl-axis-y shape a r #:optional (center #[0 0 0]))
+  "twirl-axis-y shape amount radius [center]
+  Twirls the shape in the y axis
+  around the line extending from
+  the center point"
+  (generic-twirl-y shape a r center centered-twirl-axis-x)
+)
+(export twirl-axis-y)
+
+(define* (twirl-z shape a r #:optional (center #[0 0 0]))
+  "twirl-z shape amount radius [center]
+  Twirls the shape in the z axis
+  around the optional center point"
+  (generic-twirl-z shape a r center centered-twirl-x)
+)
+(export twirl-z)
+
+(define* (twirl-axis-z shape a r #:optional (center #[0 0 0]))
+  "twirl-axis-z shape amount radius [center]
+  Twirls the shape in the y axis
+  around the line extending from
+  the center point"
+  (generic-twirl-z shape a r center centered-twirl-axis-x)
+)
+(export twirl-axis-z)

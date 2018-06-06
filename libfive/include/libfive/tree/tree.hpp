@@ -27,6 +27,9 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 namespace Kernel {
 
+// Forward declaration
+class OracleClause;
+
 /*
  *  A Tree represents a tree of math expressions.
  *
@@ -43,6 +46,11 @@ public:
     Tree(float v);
 
     /*
+     *  Returns a Tree for the given oracle, taking ownership.
+     */
+    Tree(std::unique_ptr<const OracleClause>&& oracle);
+
+    /*
      *  Constructors for individual axes
      */
     static Tree X() { return Tree(Opcode::VAR_X); }
@@ -52,7 +60,7 @@ public:
     /*
      *  Used to mark a bad parse, among other things
      */
-    static Tree Invalid() { return Tree(nullptr); }
+    static Tree Invalid() { return Tree(std::shared_ptr<Tree_>(nullptr)); }
 
     /*
      *  Returns a token for the given operation
@@ -71,10 +79,15 @@ public:
      */
     static Tree var();
 
+    /*
+     *  Destructor to ensure thread-safety while manipulating the Cache
+     */
+    ~Tree();
+
     /*  Bitfield enum for node flags */
     enum Flags {
         /*  Does this Id only contain constants and variables
-         *  (no VAR_X, VAR_Y, or VAR_Z opcodes allowed) */
+         *  (no VAR_X, VAR_Y, VAR_Z, or ORACLE opcodes allowed) */
         FLAG_LOCATION_AGNOSTIC  = (1<<1),
     };
 
@@ -91,6 +104,9 @@ public:
 
         /*  Only populated for constants  */
         const float value;
+
+        /* Only populated for oracles */
+        const std::unique_ptr<const OracleClause> oracle;
 
         /*  Only populated for operations  */
         const std::shared_ptr<Tree_> lhs;
@@ -137,7 +153,15 @@ public:
     /*
      *  Executes an arbitrary remapping
      */
-    Tree remap(std::map<Id, std::shared_ptr<Tree_>> m) const;
+    Tree remap(std::map<Id, Tree> m) const;
+
+    /*
+     *  Returns a tree in which all VAR clauses are wrapped in a
+     *  CONST_VAR clause.  This effectively disables their contribution
+     *  to Jacobian (per-variable gradient) evaluation, which is useful
+     *  for making direct modeling more nuanced.
+     */
+    Tree makeVarsConstant() const;
 
     /*
      *  Walks the tree in rank order, from lowest to highest
@@ -207,9 +231,13 @@ OP_BINARY(pow);
 OP_BINARY(nth_root);
 OP_BINARY(mod);
 OP_BINARY(nanfill);
+OP_BINARY(compare);
 #undef OP_BINARY
 
 /*
  *  Deserialize with Scheme-style syntax
  */
 std::ostream& operator<<(std::ostream& stream, const Kernel::Tree& tree);
+
+// This include goes at the bottom to work around circular ordering
+#include "libfive/tree/oracle_clause.hpp"

@@ -1,3 +1,8 @@
+# Sanity-checking to make sure CMake was run against the correct directory
+if (NOT DEFINED LIBFIVE_BUILD_FROM_ROOT)
+    message(FATAL_ERROR "CMake must be called against top-level directory")
+endif()
+
 # Instruct CMake to run moc, uic, and rrc automatically when needed.
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
@@ -11,6 +16,7 @@ find_package(Qt5Network REQUIRED)
 find_package(Qt5Concurrent REQUIRED)
 
 set(SRCS src/main.cpp
+    src/args.cpp
     src/app.cpp
     src/arrow.cpp
     src/axes.cpp
@@ -20,7 +26,6 @@ set(SRCS src/main.cpp
     src/busy.cpp
     src/camera.cpp
     src/documentation.cpp
-    src/icosphere.cpp
     src/script.cpp
     src/settings.cpp
     src/shader.cpp
@@ -56,6 +61,10 @@ if(APPLE)
 else()
     add_executable(Studio ${SRCS} ${QOBJECTS})
 endif()
+
+if(UNIX AND NOT(APPLE))
+    install(TARGETS Studio DESTINATION bin RENAME studio)
+endif(UNIX AND NOT(APPLE))
 
 target_include_directories(Studio PUBLIC include)
 target_link_libraries(Studio five-guile

@@ -25,10 +25,14 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include <cstdint>
 
 #include <Eigen/Eigen>
+#include <Eigen/StdVector>
 
+#include "libfive/export.hpp"
 #include "libfive/render/brep/region.hpp"
+#include "libfive/render/brep/intersection.hpp"
 #include "libfive/render/brep/marching.hpp"
 #include "libfive/render/brep/eval_xtree.hpp"
+#include "libfive/render/brep/neighbors.hpp"
 #include "libfive/eval/interval.hpp"
 
 namespace Kernel {
@@ -38,42 +42,50 @@ class XTree
 {
 public:
     /*
-     *  Constructs an octree or quadtree by subdividing a region
-     *  (unstoppable)
+     *  Simple constructor
      */
-    static std::unique_ptr<const XTree> build(
-            Tree t, Region<N> region, double min_feature=0.1,
-            double max_err=1e-8, bool multithread=true);
+    explicit XTree(XTree<N>* parent, Region<N> region);
 
     /*
-     *  Fully-specified XTree builder (stoppable through cancel)
+     *  Populates type, setting corners, manifold, and done if this region is
+     *  fully inside or outside the mode.
+     *
+     *  Returns a shorter version of the tape that ignores unambiguous clauses.
      */
-    static std::unique_ptr<const XTree> build(
-            Tree t, const std::map<Tree::Id, float>& vars,
-            Region<N> region, double min_feature,
-            double max_err, bool multithread,
-            std::atomic_bool& cancel);
+    std::shared_ptr<Tape> evalInterval(IntervalEvaluator& eval,
+                                       std::shared_ptr<Tape> tape);
 
     /*
-     *  XTree builder that re-uses existing evaluators
-     *  If multithread is true, es must be a pointer to an array of evaluators
+     *  Evaluates and stores a result at every corner of the cell.
+     *  Sets type to FILLED / EMPTY / AMBIGUOUS based on the corner values.
+     *  Then, solves for vertex position, populating AtA / AtB / BtB.
      */
-    static std::unique_ptr<const XTree> build(
-            XTreeEvaluator* es,
-            Region<N> region, double min_feature,
-            double max_err, bool multithread,
-            std::atomic_bool& cancel);
+    void evalLeaf(XTreeEvaluator* eval, std::shared_ptr<Tape> tape);
+
+    /*
+     *  If all children are present, then collapse based on the error
+     *  metrics from the combined QEF (or interval filled / empty state).
+     *
+     *  Returns false if any children are yet to come, true otherwise.
+     */
+    bool collectChildren(XTreeEvaluator* eval, std::shared_ptr<Tape> tape,
+                         double max_err);
+
+    /*
+     *  Deletes all of the children
+     */
+    ~XTree();
 
     /*
      *  Checks whether this tree splits
      */
-    bool isBranch() const { return children[0].get() != nullptr; }
+    bool isBranch() const { return children[0] != nullptr; }
 
     /*
      *  Looks up a child, returning *this if this isn't a branch
      */
     const XTree<N>* child(unsigned i) const
-    { return isBranch() ? children[i].get() : this; }
+    { return isBranch() ? children[i].load() : this; }
 
     /*
      *  Returns the filled / empty state for the ith corner
@@ -85,13 +97,7 @@ public:
      */
     Eigen::Array<double, N, 1> cornerPos(uint8_t i) const
     {
-        Eigen::Array<double, N, 1> out;
-        for (unsigned axis=0; axis < N; ++axis)
-        {
-            out(axis) = (i & (1 << axis)) ? region.upper(axis)
-                                          : region.lower(axis);
-        }
-        return out;
+        return corner_positions.row(i);
     }
 
     /*
@@ -106,13 +112,19 @@ public:
      *  Unpack the vertex into a 3-element array
      *  (using the region's perpendicular coordinates)
      */
-    Eigen::Vector3d vert3(unsigned index=0) const;
+    FIVE_EXPORT Eigen::Vector3d vert3(unsigned index=0) const;
+
+    /*  Helper typedef for N-dimensional column vector */
+    typedef Eigen::Matrix<double, N, 1> Vec;
+
+    /*  Parent tree, or nullptr if this is the root */
+    XTree<N>* parent;
 
     /*  The region filled by this XTree */
     const Region<N> region;
 
     /*  Children pointers, if this is a branch  */
-    std::array<std::unique_ptr<const XTree<N>>, 1 << N> children;
+    std::array<std::atomic<XTree<N>*>, 1 << N> children;
 
     /*  level = max(map(level, children)) + 1  */
     unsigned level=0;
@@ -129,9 +141,28 @@ public:
     Eigen::Matrix<double, N, 1> vert(unsigned i=0) const
     { assert(i < vertex_count); return verts.col(i); }
 
+    /*
+     *  Looks up a particular intersection array by corner indices
+     */
+    const IntersectionVec<N>& intersection(unsigned a, unsigned b) const
+    {
+        assert(mt->e[a][b] != -1);
+        return intersections[mt->e[a][b]];
+    }
+
     /*  Array of filled states for the cell's corners
-     *  (must only be FILLEd / EMPTY, not UNKNOWN or AMBIGUOUS ) */
+     *  (must only be FILLED / EMPTY, not UNKNOWN or AMBIGUOUS ) */
     std::array<Interval::State, 1 << N> corners;
+
+    /*  Array of precomputed corner positions, stored once at the
+     *  beginning of the constructor and looked up with cornerPos() */
+    Eigen::Matrix<double, 1 << N, N> corner_positions;
+
+    /* Here, we'll prepare to store position, {normal, value} pairs
+     * for every crossing and feature.  RAM is cheap, so we allocated
+     * enough space for at least two inside-outside intersection pairs
+     * on each edge; more pairs resize the small_vector */
+    std::array<IntersectionVec<N>, _edges(N) * 2> intersections;
 
     /*  Leaf cell state, when known  */
     Interval::State type=Interval::UNKNOWN;
@@ -162,19 +193,6 @@ public:
     static std::unique_ptr<const Marching::MarchingTable<N>> mt;
 
 protected:
-    /*  Helper typedef for N-dimensional column vector */
-    typedef Eigen::Matrix<double, N, 1> Vec;
-
-    /*
-     *  Private constructor for XTree
-     *
-     *  If multiple evaluators are provided, then tree construction will
-     *  be distributed across multiple threads.
-     */
-    XTree(XTreeEvaluator* eval, Region<N> region,
-          double min_feature, double max_err, bool multithread,
-          std::atomic_bool& cancel);
-
     /*
      *  Searches for a vertex within the XTree cell, using the QEF matrices
      *  that are pre-populated in AtA, AtB, etc.
@@ -212,6 +230,16 @@ protected:
      */
     bool leafsAreManifold() const;
 
+    /*
+     *  Sets corner_mask based on corner[] values
+     */
+    void buildCornerMask();
+
+    /*
+     *  Deletes all children branches, setting the children array to nulls
+     */
+    void deleteBranches();
+
     /*  Mass point is the average intersection location *
      *  (the last coordinate is number of points summed) */
     Eigen::Matrix<double, N + 1, 1> _mass_point;
@@ -220,6 +248,9 @@ protected:
     Eigen::Matrix<double, N, N> AtA;
     Eigen::Matrix<double, N, 1> AtB;
     double BtB=0;
+
+    /*  Marks whether this tree is fully constructed */
+    std::atomic_bool done;
 
     /*  Eigenvalue threshold for determining feature rank  */
     constexpr static double EIGENVALUE_CUTOFF=0.1f;

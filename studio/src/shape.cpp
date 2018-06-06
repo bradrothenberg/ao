@@ -19,7 +19,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "studio/shape.hpp"
 #include "studio/shader.hpp"
 
-#include "libfive/solve/bounds.hpp"
+#include "libfive/eval/tape.hpp"
 
 const int Shape::MESH_DIV_EMPTY;
 const int Shape::MESH_DIV_ABORT;
@@ -103,13 +103,32 @@ void Shape::draw(const QMatrix4x4& M)
     {
         initializeOpenGLFunctions();
 
+        mesh_bounds = Kernel::Region<3>({0,0,0}, {0,0,0});
         GLfloat* verts = new GLfloat[mesh->verts.size() * 6];
         unsigned i = 0;
+
+        // Unpack vertices into a flat array that will loaded into OpenGL
         for (auto& v : mesh->verts)
         {
+            const auto v_ = v.template cast<double>().array().eval();
+            // Track mesh's bounding box
+            if (i == 0)
+            {
+                mesh_bounds.lower = v_;
+                mesh_bounds.upper = v_;
+            }
+            else
+            {
+                mesh_bounds.lower = mesh_bounds.lower.array().cwiseMin(v_);
+                mesh_bounds.upper = mesh_bounds.upper.array().cwiseMax(v_);
+            }
+
+            // Position
             verts[i++] = v.x();
             verts[i++] = v.y();
             verts[i++] = v.z();
+
+            // Color
             verts[i++] = 1;
             verts[i++] = 1;
             verts[i++] = 1;
@@ -153,17 +172,20 @@ void Shape::draw(const QMatrix4x4& M)
 
     if (gl_ready)
     {
-        auto shade = (grabbed || hover) ? QVector3D(1, 1, 1)
-                                        : QVector3D(0.9, 0.9, 0.9);
+        auto s = (grabbed || hover) ? 1 : 0.9;
 
-        Shader::shaded->bind();
-        glUniform3f(Shader::shaded->uniformLocation("shade"),
-                    shade.x(), shade.y(), shade.z());
-        glUniformMatrix4fv(Shader::shaded->uniformLocation("M"), 1, GL_FALSE, M.data());
+        Shader::basic->bind();
+        glUniform4f(Shader::basic->uniformLocation("color_mul"),
+                    0.96 * s, 0.75 * s, 0.63 * s, 1.0f);
+        glUniform4f(Shader::basic->uniformLocation("color_add"),
+                    0.03 * s, 0.21 * s, 0.26 * s, 0.0f);
+        glUniform1i(Shader::basic->uniformLocation("shading"), 2);
+        glUniformMatrix4fv(Shader::basic->uniformLocation("M"),
+                           1, GL_FALSE, M.data());
         vao.bind();
         glDrawElements(GL_TRIANGLES, mesh->branes.size() * 3, GL_UNSIGNED_INT, NULL);
         vao.release();
-        Shader::shaded->release();
+        Shader::basic->release();
     }
 }
 
@@ -171,15 +193,18 @@ void Shape::drawMonochrome(const QMatrix4x4& M, QColor color)
 {
     if (gl_ready)
     {
-        Shader::monochrome->bind();
-        glUniformMatrix4fv(Shader::monochrome->uniformLocation("M"),
+        Shader::basic->bind();
+        glUniformMatrix4fv(Shader::basic->uniformLocation("M"),
                            1, GL_FALSE, M.data());
-        glUniform4f(Shader::monochrome->uniformLocation("frag_color"),
+        glUniform1i(Shader::basic->uniformLocation("shading"), 0);
+        glUniform4f(Shader::basic->uniformLocation("color_add"),
                 color.redF(), color.greenF(), color.blueF(), 1.0f);
+        glUniform4f(Shader::basic->uniformLocation("color_mul"), 0, 0, 0, 0);
+
         vao.bind();
         glDrawElements(GL_TRIANGLES, mesh->branes.size() * 3, GL_UNSIGNED_INT, NULL);
         vao.release();
-        Shader::monochrome->release();
+        Shader::basic->release();
     }
 }
 
@@ -255,12 +280,13 @@ void Shape::setHover(bool h)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-Kernel::JacobianEvaluator* Shape::dragFrom(const QVector3D& v)
+std::pair<Kernel::JacobianEvaluator*, Kernel::Tape::Handle>
+Shape::dragFrom(const QVector3D& v)
 {
     auto e = new Kernel::JacobianEvaluator(
-            std::make_shared<Kernel::Tape>(tree), vars);
-    e->evalAndPush({v.x(), v.y(), v.z()});
-    return e;
+            std::make_shared<Kernel::Deck>(tree), vars);
+    auto o = e->evalAndPush({v.x(), v.y(), v.z()});
+    return std::make_pair(e, o.second);
 }
 
 void Shape::deleteLater()
@@ -284,7 +310,7 @@ void Shape::onFutureFinished()
     if (bm.first != nullptr)
     {
         mesh.reset(bm.first);
-        bounds = bm.second;
+        render_bounds = bm.second;
 
         gl_ready = false;
         emit(gotMesh());
@@ -333,26 +359,9 @@ Shape::BoundedMesh Shape::renderMesh(QPair<Settings, int> s)
 {
     cancel.store(false);
 
-    // Use the global bounds settings by default, but try to solve for more
-    // precise bounds if autobounds is true.
+    // Use the global bounds settings
     Kernel::Region<3> r({s.first.min.x(), s.first.min.y(), s.first.min.z()},
                         {s.first.max.x(), s.first.max.y(), s.first.max.z()});
-    if (s.first.autobounds)
-    {
-        auto r_ = Kernel::findBounds(&es[0].interval);
-        if (!r_.lower.isNaN().any() &&
-            !r_.upper.isNaN().any() &&
-            ((r_.upper - r_.lower).array() / (r.upper - r.lower).array())
-                .abs().maxCoeff() < 1000)
-        {
-            r = r_;
-
-            // Add a little padding for numerical safety
-            Kernel::Region<3>::Pt diff = r.upper - r.lower;
-            r.lower -= diff / 10;
-            r.upper += diff / 10;
-        }
-    }
     auto m = Kernel::Mesh::render(es.data(), r,
             1 / (s.first.res / (1 << s.second)),
             pow(10, -s.first.quality), cancel);

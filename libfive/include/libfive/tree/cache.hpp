@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include <memory>
 #include <mutex>
 
+#include "libfive/export.hpp"
 #include "libfive/tree/tree.hpp"
 
 namespace Kernel {
@@ -66,6 +67,19 @@ public:
     void del(float v);
     void del(Opcode::Opcode op, Node lhs=nullptr, Node rhs=nullptr);
 
+    /*
+     *  Returns the given node as an affine sum-of-multiplications
+     *
+     *  This is a building block for automatic collapsing of affine
+     *  expressions, exposed here primarily for unit testing.
+     */
+    std::map<Node, float> asAffine(Node n);
+
+    /*
+     *  Converts a sum-of-multiplications into an affine tree.
+     */
+    Node fromAffine(const std::map<Node, float>& ns);
+
 protected:
     /*
      *  Cache constructor is private so outsiders must use instance()
@@ -86,6 +100,12 @@ protected:
     Node checkCommutative(Opcode::Opcode op, Node a, Node b);
 
     /*
+     *  Checks whether a `op` b can be replaced by a simpler affine
+     *  form, e.g. (2*x + y) - (4*y) --> 2*x - 3*y
+     */
+    Node checkAffine(Opcode::Opcode op, Node a, Node b);
+
+    /*
      *  A Key uniquely identifies an operation Node, so that we can
      *  deduplicate based on opcode  and arguments
      */
@@ -97,8 +117,15 @@ protected:
     /*  Constants in the tree are uniquely identified by their value  */
     std::map<float, std::weak_ptr<Tree::Tree_>> constants;
 
-    static std::recursive_mutex mut;
-    static Cache _instance;
+    /*  nan cannot be stored in the usual map, so the nan constant lives here */
+    std::weak_ptr<Tree::Tree_> nan_constant;
+
+    /*  Oracles do not need to use the cache to be deduplicated, since they
+     *  are created from unique_ptr's, and therefore are already impossible
+     *  to duplicate.  */
+
+    static FIVE_EXPORT std::recursive_mutex mut;
+    static FIVE_EXPORT Cache _instance;
 };
 
 }   // namespace Kernel

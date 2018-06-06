@@ -18,7 +18,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "catch.hpp"
 
+#include <array>
+#include <future>
+
 #include "libfive/tree/tree.hpp"
+#include "util/oracles.hpp"
 
 using namespace Kernel;
 
@@ -26,9 +30,9 @@ TEST_CASE("Joining two trees")
 {
     auto t = Tree::X() + 1;
 
-    REQUIRE(t->op == Opcode::ADD);
+    REQUIRE(t->op == Opcode::OP_ADD);
     REQUIRE(t->lhs->op == Opcode::VAR_X);
-    REQUIRE(t->rhs->op == Opcode::CONST);
+    REQUIRE(t->rhs->op == Opcode::CONSTANT);
     REQUIRE(t->rhs->value == 1);
 }
 
@@ -54,7 +58,7 @@ TEST_CASE("Tree::serialize")
         auto a = min(Tree::X(), Tree::Y());
         auto out = a.serialize();
         std::vector<uint8_t> expected =
-            {'T', '"', '"', '"', '"', Opcode::VAR_X, Opcode::VAR_Y, Opcode::MIN, 1, 0, 0, 0, 0, 0, 0, 0};
+            {'T', '"', '"', '"', '"', Opcode::VAR_X, Opcode::VAR_Y, Opcode::OP_MIN, 1, 0, 0, 0, 0, 0, 0, 0, 0xFF};
         REQUIRE(out == expected);
     }
 
@@ -63,7 +67,7 @@ TEST_CASE("Tree::serialize")
         auto a = min(Tree::X(), Tree::X());
         auto out = a.serialize();
         std::vector<uint8_t> expected =
-            {'T', '"', '"', '"', '"', Opcode::VAR_X, Opcode::MIN, 0, 0, 0, 0, 0, 0, 0, 0};
+            {'T', '"', '"', '"', '"', Opcode::VAR_X, Opcode::OP_MIN, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF};
         REQUIRE(out == expected);
     }
 }
@@ -74,7 +78,7 @@ TEST_CASE("Tree::deserialize")
     {
         auto a = Tree::deserialize(min(Tree::X(), Tree::Y()).serialize());
         REQUIRE(a.id() != nullptr);
-        REQUIRE(a->op == Opcode::MIN);
+        REQUIRE(a->op == Opcode::OP_MIN);
         REQUIRE(a->lhs->op == Opcode::VAR_X);
         REQUIRE(a->rhs->op == Opcode::VAR_Y);
     }
@@ -83,9 +87,9 @@ TEST_CASE("Tree::deserialize")
     {
         auto a = Tree::deserialize(min(Tree::X(), Tree(2.5f)).serialize());
         REQUIRE(a.id() != nullptr);
-        REQUIRE(a->op == Opcode::MIN);
+        REQUIRE(a->op == Opcode::OP_MIN);
         REQUIRE(a->lhs->op == Opcode::VAR_X);
-        REQUIRE(a->rhs->op == Opcode::CONST);
+        REQUIRE(a->rhs->op == Opcode::CONSTANT);
         REQUIRE(a->rhs->value == 2.5f);
     }
 
@@ -93,9 +97,9 @@ TEST_CASE("Tree::deserialize")
     {
         auto a = Tree::deserialize(min(Tree::X(), Tree::var()).serialize());
         REQUIRE(a.id() != nullptr);
-        REQUIRE(a->op == Opcode::MIN);
+        REQUIRE(a->op == Opcode::OP_MIN);
         REQUIRE(a->lhs->op == Opcode::VAR_X);
-        REQUIRE(a->rhs->op == Opcode::VAR);
+        REQUIRE(a->rhs->op == Opcode::VAR_FREE);
     }
 }
 
@@ -125,7 +129,63 @@ TEST_CASE("Tree::remap")
 
 TEST_CASE("Tree: operator<<")
 {
-    std::stringstream ss;
-    ss << (Tree::X() + 5);
-    REQUIRE(ss.str() == "(+ x 5)");
+    SECTION("Basic")
+    {
+        std::stringstream ss;
+        ss << (Tree::X() + 5);
+        REQUIRE(ss.str() == "(+ x 5)");
+    }
+
+    SECTION("With oracle")
+    {
+        std::stringstream ss;
+        auto o = Tree(std::unique_ptr<OracleClause>(new CubeOracleClause));
+        ss << (Tree::X() + 5 + o);
+        REQUIRE(ss.str() == "(+ x 5 'CubeOracle)");
+    }
+}
+
+TEST_CASE("Tree::makeVarsConstant")
+{
+    auto v = Tree::var();
+    auto w = Tree::var();
+    auto a = 2 * v + 5 * w;
+    auto b = a.makeVarsConstant();
+
+    {
+        std::stringstream ss;
+        ss << a;
+        REQUIRE(ss.str() == "(+ (* 2 var-free) (* 5 var-free))");
+
+    }
+    {
+        std::stringstream ss;
+        ss << b;
+        REQUIRE(ss.str() == "(+ (* 2 (const-var var-free)) (* 5 (const-var var-free)))");
+    }
+}
+
+TEST_CASE("Tree thread safety")
+{
+    // This test is only valid in debug builds, because it checks an
+    // assertion in Cache::del.
+    std::array<std::future<void>, 2> futures;
+    for (unsigned i=0; i < futures.size(); ++i)
+    {
+        futures[i] = std::async(std::launch::async,
+            [](){
+                for (unsigned j=0; j < 100000; ++j)
+                {
+                    auto x = new Tree(Tree::X());
+                    delete x;
+                }
+            });
+    }
+
+    for (auto& f : futures)
+    {
+        f.get();
+    }
+
+    REQUIRE(true);
 }

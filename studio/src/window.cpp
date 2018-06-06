@@ -42,8 +42,8 @@ switch (checkUnsaved())                                                     \
     default:    assert(false);                                              \
 }
 
-Window::Window(QString target)
-    : QMainWindow(), editor(new Editor), view(new View)
+Window::Window(Arguments args)
+    : QMainWindow(), editor(new Editor(nullptr, args.do_syntax)), view(new View)
 {
     resize(QDesktopWidget().availableGeometry(this).size() * 0.75);
 
@@ -134,8 +134,8 @@ Window::Window(QString target)
     show_bbox_action->setCheckable(true);
     connect(show_bbox_action, &QAction::triggered, view, &View::showBBox);
 
-    auto perspective_action = new QAction("Perspective");
-    auto ortho_action = new QAction("Orthographic");
+    auto perspective_action = new QAction("Perspective", nullptr);
+    auto ortho_action = new QAction("Orthographic", nullptr);
     view_menu->addSection("Projection");
     view_menu->addAction(perspective_action);
     view_menu->addAction(ortho_action);
@@ -151,10 +151,10 @@ Window::Window(QString target)
             view, &View::toOrthographic);
 
     view_menu->addSeparator();
-    auto edit_bounds_action = new QAction("Edit bounds");
+    auto edit_bounds_action = new QAction("Edit bounds", nullptr);
     view_menu->addAction(edit_bounds_action);
     connect(edit_bounds_action, &QAction::triggered, view, &View::openSettings);
-    auto zoom_to_action = new QAction("Zoom to bounds");
+    auto zoom_to_action = new QAction("Zoom to bounds", nullptr);
     view_menu->addAction(zoom_to_action);
     connect(zoom_to_action, &QAction::triggered, view, &View::zoomTo);
 
@@ -185,22 +185,25 @@ Window::Window(QString target)
 
     interpreter->start();
 
+    #ifdef Q_OS_LINUX
+        setWindowTitle("Studio[*]");
+    #endif
     show();
 
     {   //  Load the tutorial file on first run if there's no target
         QSettings settings("impraxical", "Studio");
         if (settings.contains("first-run") &&
             settings.value("first-run").toBool() &&
-            target.isNull())
+            args.filename.isEmpty())
         {
-            target = ":/examples/tutorial.io";
+            args.filename = ":/examples/tutorial.io";
         }
         settings.setValue("first-run", false);
     }
 
-    if (!target.isEmpty() && loadFile(target))
+    if (!args.filename.isEmpty() && loadFile(args.filename))
     {
-        setFilename(target);
+        setFilename(args.filename);
     }
 }
 
@@ -220,7 +223,7 @@ void Window::onOpen(bool)
 {
     CHECK_UNSAVED();
 
-    QString f = QFileDialog::getOpenFileName(nullptr, "Open",
+    QString f = QFileDialog::getOpenFileName(this, "Open",
             workingDirectory(), "*.io;;*.ao");
     if (!f.isEmpty() && loadFile(f))
     {
@@ -309,7 +312,7 @@ bool Window::onSave(bool)
 
 bool Window::onSaveAs(bool)
 {
-    QString f = QFileDialog::getSaveFileName(nullptr, "Save as",
+    QString f = QFileDialog::getSaveFileName(this, "Save as",
             workingDirectory(), "*.io");
     if (!f.isEmpty())
     {
@@ -335,6 +338,9 @@ void Window::onNew(bool)
     CHECK_UNSAVED();
 
     setFilename("");
+    #ifdef Q_OS_LINUX
+        setWindowTitle("Studio[*]");
+    #endif
     editor->setScript("");
     editor->setModified(false);
 }
@@ -416,11 +422,20 @@ void Window::setFilename(const QString& f)
     filename = f;
     if (filename.startsWith(":/"))
     {
-        setWindowTitle(QFileInfo(filename).fileName() + " (read-only)");
+        QString title = QFileInfo(filename).fileName() + " (read-only)";
+        #ifdef Q_OS_LINUX
+            setWindowTitle(title+"[*]");
+        #else
+            setWindowTitle(title);
+        #endif
     }
     else
     {
-        setWindowTitle(QString());
+        #ifdef Q_OS_LINUX
+            setWindowTitle(QFileInfo(filename).fileName() + "[*]");
+        #else
+            setWindowTitle(QString());
+        #endif
         setWindowFilePath(f);
     }
 }
@@ -454,7 +469,7 @@ void Window::onExportReady(QList<const Kernel::Mesh*> shapes)
 void Window::onExport(bool)
 {
     export_filename = QFileDialog::getSaveFileName(
-            nullptr, "Export", workingDirectory(), "*.stl");
+            this, "Export", workingDirectory(), "*.stl");
     if (export_filename.isEmpty())
     {
         return;

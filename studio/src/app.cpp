@@ -20,10 +20,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <QDebug>
 
 #include "studio/app.hpp"
+#include "studio/args.hpp"
 
 App::App(int& argc, char** argv)
     : QApplication(argc, argv),
-      window(argc > 1 ? argv[1] : QString())
+      window(Arguments(this))
 {
     // Nothing to do here
 }
