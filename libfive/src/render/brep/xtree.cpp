@@ -24,9 +24,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include <cmath>
 
 #include <Eigen/StdVector>
+#include <boost/lockfree/queue.hpp>
 
 #include "libfive/render/brep/xtree.hpp"
 #include "libfive/render/axes.hpp"
+#include "libfive/eval/tape.hpp"
 
 namespace Kernel {
 
@@ -39,352 +41,279 @@ std::unique_ptr<const Marching::MarchingTable<N>> XTree<N>::mt;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-template <unsigned N>
-std::unique_ptr<const XTree<N>> XTree<N>::build(
-        Tree t, Region<N> region, double min_feature,
-        double max_err, bool multithread)
-{
-    std::atomic_bool cancel(false);
-    const std::map<Tree::Id, float> vars;
-    return build(t, vars, region, min_feature, max_err, multithread, cancel);
-}
-
-template <unsigned N>
-std::unique_ptr<const XTree<N>> XTree<N>::build(
-            Tree t, const std::map<Tree::Id, float>& vars,
-            Region<N> region, double min_feature,
-            double max_err, bool multithread,
-            std::atomic_bool& cancel)
-{
-    if (multithread)
-    {
-        std::vector<XTreeEvaluator, Eigen::aligned_allocator<XTreeEvaluator>> es;
-        es.reserve(1 << N);
-        for (unsigned i=0; i < (1 << N); ++i)
-        {
-            es.emplace_back(XTreeEvaluator(t, vars));
-        }
-        return build(es.data(), region, min_feature, max_err, true, cancel);
-    }
-    else
-    {
-        XTreeEvaluator e(t, vars);
-        return build(&e, region, min_feature, max_err, false, cancel);
-    }
-}
-
-template <unsigned N>
-std::unique_ptr<const XTree<N>> XTree<N>::build(
-        XTreeEvaluator* es,
-        Region<N> region, double min_feature,
-        double max_err, bool multithread,
-        std::atomic_bool& cancel)
-{
-    // Lazy initialization of marching squares / cubes table
-    if (mt.get() == nullptr)
-    {
-        mt = Marching::buildTable<N>();
-    }
-
-    auto out = new XTree(es, region, min_feature, max_err, multithread, cancel);
-
-    // Return an empty XTree when cancelled
-    // (to avoid potentially ambiguous or mal-constructed trees situations)
-    if (cancel.load())
-    {
-        delete out;
-        out = nullptr;
-    }
-
-    return std::unique_ptr<const XTree<N>>(out);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 template <unsigned N>
-XTree<N>::XTree(XTreeEvaluator* eval, Region<N> region,
-                double min_feature, double max_err, bool multithread,
-                std::atomic_bool& cancel)
-    : region(region), _mass_point(Eigen::Matrix<double, N + 1, 1>::Zero()),
+XTree<N>::XTree(XTree<N>* parent, Region<N> region)
+    : parent(parent), region(region),
+      type(Interval::UNKNOWN),
+      _mass_point(Eigen::Matrix<double, N + 1, 1>::Zero()),
       AtA(Eigen::Matrix<double, N, N>::Zero()),
-      AtB(Eigen::Matrix<double, N, 1>::Zero())
+      AtB(Eigen::Matrix<double, N, 1>::Zero()),
+      done(false)
 {
-    if (cancel.load())
-    {
-        return;
-    }
-
-    // Clear all indices
     std::fill(index.begin(), index.end(), 0);
-
-    // Do a preliminary evaluation to prune the tree
-    auto i = eval->interval.evalAndPush(region.lower3().template cast<float>(),
-                                        region.upper3().template cast<float>());
-
-    if (Interval::isFilled(i))
+    std::fill(corners.begin(), corners.end(), Interval::UNKNOWN);
+    for (auto& c : children)
     {
-        type = Interval::FILLED;
+        c.store(nullptr);
     }
-    else if (Interval::isEmpty(i))
-    {
-        type = Interval::EMPTY;
-    }
-    // If the cell wasn't empty or filled, attempt to subdivide and recurse
-    else
-    {
-        bool all_empty = true;
-        bool all_full  = true;
+}
 
-        // Recurse until volume is too small
-        if (((region.upper - region.lower) > min_feature).any())
-        {
-            auto rs = region.subdivide();
+template <unsigned N>
+XTree<N>::~XTree()
+{
+    deleteBranches();
+}
 
-            if (multithread)
-            {
-                // Evaluate every child in a separate thread
-                std::array<std::future<XTree<N>*>, 1 << N> futures;
+template <unsigned N>
+Tape::Handle XTree<N>::evalInterval(IntervalEvaluator& eval, Tape::Handle tape)
+{
+    // Do a preliminary evaluation to prune the tree, storing the interval
+    // result and an handle to the pushed tape (which we'll use when recursing)
+    auto o = eval.evalAndPush(
+            region.lower3().template cast<float>(),
+            region.upper3().template cast<float>(),
+            tape);
 
-                assert(children.size() == futures.size());
+    type = Interval::state(o.first);
 
-                for (unsigned i=0; i < children.size(); ++i)
-                {
-                    futures[i] = std::async(std::launch::async,
-                        [&eval, &rs, i, min_feature, max_err, &cancel]()
-                        { return new XTree(
-                                eval + i, rs[i], min_feature, max_err,
-                                false, cancel); });
-                }
-                for (unsigned i=0; i < children.size(); ++i)
-                {
-                    children[i].reset(futures[i].get());
-                }
-            }
-            // Single-threaded recursive construction
-            else
-            {
-                for (uint8_t i=0; i < children.size(); ++i)
-                {
-                    // Populate child recursively
-                    children[i].reset(new XTree<N>(
-                                eval, rs[i], min_feature, max_err,
-                                false, cancel));
-                }
-            }
-
-            // Abort early if children could have been mal-constructed
-            // by an early cancel operation
-            if (cancel.load())
-            {
-                eval->interval.pop();
-                return;
-            }
-
-            // Update corner and filled / empty state from children
-            for (uint8_t i=0; i < children.size(); ++i)
-            {
-                // Grab corner values from children
-                corners[i] = children[i]->corners[i];
-
-                all_empty &= children[i]->type == Interval::EMPTY;
-                all_full  &= children[i]->type == Interval::FILLED;
-            }
-        }
-        // Terminate recursion here
-        else
-        {
-            // Pack corners into evaluator
-            std::array<Eigen::Vector3f, 1 << N> pos;
-            for (uint8_t i=0; i < children.size(); ++i)
-            {
-                pos[i] << cornerPos(i).template cast<float>(),
-                          region.perp.template cast<float>();
-                eval->array.set(pos[i], i);
-            }
-
-            // Evaluate the region's corners and check their states
-            auto ds = eval->array.derivs(children.size());
-            auto ambig = eval->array.getAmbiguous(children.size());
-            for (uint8_t i=0; i < children.size(); ++i)
-            {
-                // Handle inside, outside, and (non-ambiguous) on-boundary
-                if (ds.col(i).w() > 0 || std::isnan(ds.col(i).w()))
-                {
-                    corners[i] = Interval::EMPTY;
-                }
-                else if (ds.col(i).w() < 0)
-                {
-                    corners[i] = Interval::FILLED;
-                }
-                else if (!ambig(i))
-                {
-                    // Optimization for non-ambiguous features
-                    // (see explanation in FeatureEvaluator::isInside)
-                    corners[i] = (ds.col(i).template head<3>() != 0).any()
-                        ? Interval::FILLED : Interval::EMPTY;
-                }
-            }
-
-            // Separate pass for handling ambiguous corners
-            for (uint8_t i=0; i < children.size(); ++i)
-            {
-                if (ds.col(i).w() == 0 && ambig(i))
-                {
-                    corners[i] = eval->feature.isInside(pos[i])
-                        ? Interval::FILLED : Interval::EMPTY;
-                }
-            }
-
-            // Pack corners into filled / empty arrays
-            for (uint8_t i=0; i < children.size(); ++i)
-            {
-                all_full  &=  corners[i];
-                all_empty &= !corners[i];
-            }
-        }
-        type = all_empty ? Interval::EMPTY
-             : all_full  ? Interval::FILLED : Interval::AMBIGUOUS;
-    }
-
-    // If this cell is unambiguous, then fill its corners with values and
-    // forget all its branches; these may be no-ops, but they're idempotent
     if (type == Interval::FILLED || type == Interval::EMPTY)
     {
         std::fill(corners.begin(), corners.end(), type);
-        std::for_each(children.begin(), children.end(),
-            [](std::unique_ptr<const XTree<N>>& o) { o.reset(); });
         manifold = true;
+        buildCornerMask();
+        done.store(true);
     }
+    return o.second;
+}
 
-    // Build and store the corner mask
-    for (unsigned i=0; i < children.size(); ++i)
+template <unsigned N>
+void XTree<N>::evalLeaf(XTreeEvaluator* eval, Tape::Handle tape)
+{
+    // Store the corner positions
+    for (unsigned i=0; i < (1 << N); ++i)
     {
-        corner_mask |= (corners[i] == Interval::FILLED) << i;
-    }
-
-    // Branch checking and simplifications
-    if (isBranch())
-    {
-        // Store this tree's depth as a function of its children
-        level = std::accumulate(children.begin(), children.end(), (unsigned)0,
-            [](const unsigned& a, const std::unique_ptr<const XTree<N>>& b)
-            { return std::max(a, b->level);} ) + 1;
-
-        // If all children are non-branches, then we could collapse
-        if (std::all_of(children.begin(), children.end(),
-                        [](const std::unique_ptr<const XTree<N>>& o)
-                        { return !o->isBranch(); }))
+        Eigen::Array<double, 1, N> out;
+        for (unsigned axis=0; axis < N; ++axis)
         {
-            //  This conditional implements the three checks described in
-            //  [Ju et al, 2002] in the section titled
-            //      "Simplification with topology safety"
-            manifold = cornersAreManifold() &&
-                std::all_of(children.begin(), children.end(),
-                        [](const std::unique_ptr<const XTree<N>>& o)
-                        { return o->manifold; }) &&
-                leafsAreManifold();
+            out(axis) = (i & (1 << axis)) ? region.upper(axis)
+                                          : region.lower(axis);
+        }
+        corner_positions.row(i) = out;
+    }
 
-            // Attempt to collapse this tree by positioning the vertex
-            // in the summed QEF and checking to see if the error is small
-            if (manifold)
-            {
-                // Populate the feature rank as the maximum of all children
-                // feature ranks (as seen in DC: The Secret Sauce)
-                rank = std::accumulate(
-                        children.begin(), children.end(), (unsigned)0,
-                        [](unsigned a, const std::unique_ptr<const XTree<N>>& b)
-                            { return std::max(a, b->rank);} );
+    // Pack corners into evaluator
+    Eigen::Matrix<float, 3, 1 << N> pos;
 
-                // Accumulate the mass point and QEF matrices
-                for (const auto& c : children)
-                {
-                    if (c->rank == rank)
-                    {
-                        _mass_point += c->_mass_point;
-                    }
-                    AtA += c->AtA;
-                    AtB += c->AtB;
-                    BtB += c->BtB;
-                }
-                assert(region.contains(massPoint()));
+    // Track how many corners have to be evaluated here
+    // (if they can be looked up from a neighbor, they don't have
+    //  to be evaluated here, which can save time)
+    size_t count = 0;
 
-                // If the vertex error is below a threshold, and the vertex
-                // is well-placed in the distance field, then convert into
-                // a leaf by erasing all of the child branches
-                if (findVertex(vertex_count++) < max_err &&
-                    fabs(eval->feature.baseEval(vert3().template cast<float>()))
-                        < max_err)
-                {
-                    std::for_each(children.begin(), children.end(),
-                        [](std::unique_ptr<const XTree<N>>& o) { o.reset(); });
-                }
-                else
-                {
-                    vertex_count = 0;
-                }
-            }
+    // Remap from a value in the range [0, count) to a corner index
+    // in the range [0, 1 <<N).
+    std::array<int, 1 << N> corner_indices;
+
+    for (uint8_t i=0; i < children.size(); ++i)
+    {
+        //auto c = neighbors.check(i);
+        //if (c == Interval::UNKNOWN)
+        {
+            pos.col(count) << cornerPos(i).template cast<float>(),
+                              region.perp.template cast<float>();
+            eval->array.set(pos.col(count), count);
+            corner_indices[count++] = i;
+        }
+        /*
+        else
+        {
+            corners[i] = c;
+        }
+        */
+    }
+
+    // Evaluate the region's corners and check their states
+    // We handle evaluation in three phases:
+    // 1)  Evaluate the distance field at corners, mark < 0 or > 0
+    //     as filled or empty.
+    // 2)  For values that are == 0 but not ambiguous (i.e. do not
+    //     have a min / max where both branches are possible),
+    //     evaluate the derivatives and mark the corner as filled if
+    //     there are non-zero derivatives (because that means that we
+    //     can find an inside-outside transition).
+    // 3)  For values that are == 0 and ambiguous, call isInside
+    //     (the heavy hitter of inside-outside checking).
+    auto vs = eval->array.values(count, tape);
+
+    // We store ambiguity here, but clear it if the point is inside
+    // or outside (so after the loop below, ambig(i) is only set if
+    // pos[i] is both == 0 and ambiguous).
+    auto ambig = eval->array.getAmbiguous(count, tape);
+
+    // This is a count of how many points there are that == 0
+    // but are unambiguous; unambig_remap[z] returns the index
+    // into the pos[] array for a particular unambiguous zero.
+    uint8_t unambiguous_zeros = 0;
+    std::array<int, 1 << N> unambig_remap;
+
+    // This is phase 1, as described above
+    for (uint8_t i=0; i < count; ++i)
+    {
+        // Handle inside, outside, and (non-ambiguous) on-boundary
+        if (vs(i) > 0 || !std::isfinite(vs(i)))
+        {
+            corners[corner_indices[i]] = Interval::EMPTY;
+            ambig(i) = false;
+        }
+        else if (vs(i) < 0)
+        {
+            corners[corner_indices[i]] = Interval::FILLED;
+            ambig(i) = false;
+        }
+        else if (!ambig(i))
+        {
+            eval->array.set(pos.col(i), unambiguous_zeros);
+            unambig_remap[unambiguous_zeros] = corner_indices[i];
+            unambiguous_zeros++;
         }
     }
-    else if (type == Interval::AMBIGUOUS)
+
+    // Phase 2: Optimization for non-ambiguous features
+    // We can get both positive and negative values out if
+    // there's a non-zero gradient.
+    if (unambiguous_zeros)
     {
-        // Figure out if the leaf is manifold
-        manifold = cornersAreManifold();
-
-        // Here, we'll prepare to store position, {normal, value} pairs
-        // for every crossing and feature
-        typedef std::pair<Vec, Eigen::Matrix<double, N + 1, 1>> Intersection;
-        std::vector<Intersection, Eigen::aligned_allocator<Intersection>>
-            intersections;
-
-        // RAM is cheap, so reserve a bunch of space here to avoid
-        // the need for re-allocating later on
-        intersections.reserve(_edges(N) * 2);
-
-        // We'll use this vector anytime we need to pass something
-        // into the evaluator (which requires a Vector3f)
-        Eigen::Vector3f _pos;
-        _pos.template tail<3 - N>() = region.perp.template cast<float>();
-        auto set = [&](const Vec& v, size_t i){
-            _pos.template head<N>() = v.template cast<float>();
-            eval->array.set(_pos, i);
-        };
-
-        // Iterate over manifold patches for this corner case
-        const auto& ps = mt->v[corner_mask];
-        while (vertex_count < ps.size() && ps[vertex_count][0].first != -1)
+        auto ds = eval->array.derivs(unambiguous_zeros, tape);
+        for (unsigned i=0; i < unambiguous_zeros; ++i)
         {
-            // Iterate over edges in this patch, storing [inside, outside]
-            unsigned target_count;
-            std::array<std::pair<Vec, Vec>, _edges(N)> targets;
-            std::array<int, _edges(N)> ranks;
-            std::fill(ranks.begin(), ranks.end(), -1);
+            corners[unambig_remap[i]] =
+                (ds.col(i).template head<3>() != 0).any()
+                    ? Interval::FILLED : Interval::EMPTY;
+        }
+    }
 
-            for (target_count=0; target_count < ps[vertex_count].size() &&
-                          ps[vertex_count][target_count].first != -1; ++target_count)
+    // Phase 3: One last pass for handling ambiguous corners
+    for (uint8_t i=0; i < count; ++i)
+    {
+        if (ambig(i))
+        {
+            corners[corner_indices[i]] =
+                eval->feature.isInside(pos.col(i), tape)
+                    ? Interval::FILLED
+                    : Interval::EMPTY;
+        }
+    }
+
+    bool all_full = true;
+    bool all_empty = true;
+
+    // Pack corners into filled / empty arrays
+    for (uint8_t i=0; i < children.size(); ++i)
+    {
+        all_full  = all_full && corners[i];
+        all_empty = all_empty && !corners[i];
+    }
+
+    type = all_empty ? Interval::EMPTY
+         : all_full  ? Interval::FILLED : Interval::AMBIGUOUS;
+
+    buildCornerMask();
+
+    // Now, for the fun part of actually placing vertices!
+    // Figure out if the leaf is manifold
+    manifold = cornersAreManifold();
+
+    // We'll use this vector anytime we need to pass something
+    // into the evaluator (which requires a Vector3f)
+    Eigen::Vector3f _pos;
+    _pos.template tail<3 - N>() = region.perp.template cast<float>();
+    auto set = [&](const Vec& v, size_t i){
+        _pos.template head<N>() = v.template cast<float>();
+        eval->array.set(_pos, i);
+    };
+
+    // Iterate over manifold patches, storing one vertex per patch
+    const auto& ps = mt->v[corner_mask];
+    while (vertex_count < ps.size() && ps[vertex_count][0].first != -1)
+    {
+        // Number of edges, total
+        unsigned edge_count;
+
+        // Edge indices (as found with mt->e[a][b]) for all edges,
+        // with edge_count valid entries.
+        std::array<size_t, _edges(N)> edges;
+
+        {   // Within this block, we calculate all edges that haven't
+            // already been calculated by neighbors and store them in
+            // the appropriate slot of the intersections array.
+
+            // Numbers of edges that need evaluation
+            unsigned eval_count;
+
+            // Inside-outside pairs, with eval_count valid pairs
+            std::array<std::pair<Vec, Vec>, _edges(N)> targets;
+
+            // Edge indices (as found with mt->e[a][b]) for edges under
+            // evaluation, with eval_count valid values.
+            std::array<size_t, _edges(N)> eval_edges;
+
+            // Iterate over edges in this patch, storing [inside, outside]
+            // in the targets array if the list of intersections can't be
+            // re-used from a neighbor.
+            for (edge_count=0, eval_count=0;
+                 edge_count < ps[vertex_count].size() &&
+                     ps[vertex_count][edge_count].first != -1;
+                 ++edge_count)
             {
                 // Sanity-checking
-                assert(corners[ps[vertex_count][target_count].first]
+                assert(corners[ps[vertex_count][edge_count].first]
                        == Interval::FILLED);
-                assert(corners[ps[vertex_count][target_count].second]
+                assert(corners[ps[vertex_count][edge_count].second]
                        == Interval::EMPTY);
 
-                // Store inside / outside in targets array
-                targets[target_count] = {cornerPos(ps[vertex_count][target_count].first),
-                                  cornerPos(ps[vertex_count][target_count].second)};
+                // Store the edge index associated with this target
+                auto c = ps[vertex_count][edge_count];
+                edges[edge_count] = mt->e[c.first][c.second];
+
+                /*
+                auto compare = neighbors.check(c.first, c.second);
+                // Enable this to turn on sharing of results with neighbors
+                if (compare != nullptr && compare->size() > 0)
+                {
+                    intersections[edges[edge_count]] = *compare;
+                }
+                else
+                */
+                {
+                    // Store inside / outside in targets array, and the edge
+                    // index in the eval_edges array.
+                    targets[eval_count] = {cornerPos(c.first),
+                                           cornerPos(c.second)};
+                    eval_edges[eval_count] = edges[edge_count];
+
+                    assert(eval_edges[eval_count] < intersections.size());
+                    eval_count++;
+                }
+
+                assert(edges[edge_count] < intersections.size());
             }
 
-            // We do an N-fold reduction at each stage
+            // Next, we search over the target edges, doing an
+            // N-fold reduction at each stage to home in on the
+            // exact intersection position
             constexpr int SEARCH_COUNT = 4;
             constexpr int POINTS_PER_SEARCH = 16;
-            static_assert(_edges(N) * POINTS_PER_SEARCH <= ArrayEvaluator::N,
-                          "Potential overflow");
+            static_assert(
+                    _edges(N) * POINTS_PER_SEARCH <= ArrayEvaluator::N,
+                    "Potential overflow");
 
             // Multi-stage binary search for intersection
             for (int s=0; s < SEARCH_COUNT; ++s)
             {
                 // Load search points into evaluator
                 Eigen::Array<double, N, POINTS_PER_SEARCH * _edges(N)> ps;
-                for (unsigned e=0; e < target_count; ++e)
+                for (unsigned e=0; e < eval_count; ++e)
                 {
                     for (int j=0; j < POINTS_PER_SEARCH; ++j)
                     {
@@ -398,221 +327,379 @@ XTree<N>::XTree(XTreeEvaluator* eval, Region<N> region,
 
                 // Evaluate, then search for the first outside point
                 // and adjust inside / outside to their new positions
-                auto out = eval->array.values(
-                        POINTS_PER_SEARCH * target_count);
-
-                for (unsigned e=0; e < target_count; ++e)
+                if (eval_count)
                 {
-                    // Skip one point, because the very first point is
-                    // already known to be inside the shape (but sometimes,
-                    // due to numerical issues, it registers as outside!)
-                    for (unsigned j=1; j < POINTS_PER_SEARCH; ++j)
+                    auto out = eval->array.values(
+                            POINTS_PER_SEARCH * eval_count, tape);
+
+                    for (unsigned e=0; e < eval_count; ++e)
                     {
-                        const unsigned i = j + e*POINTS_PER_SEARCH;
-                        if (out[i] > 0)
+                        // Skip one point, because the very first point is
+                        // already known to be inside the shape (but
+                        // sometimes, due to numerical issues, it registers
+                        // as outside!)
+                        for (unsigned j=1; j < POINTS_PER_SEARCH; ++j)
                         {
-                            assert(i > 0);
-                            targets[e] = {ps.col(i - 1), ps.col(i)};
-                            break;
-                        }
-                        else if (out[i] == 0)
-                        {
-                            Eigen::Vector3d pos;
-                            pos << ps.col(i), region.perp;
-                            if (!eval->feature.isInside(
-                                        pos.template cast<float>()))
+                            const unsigned i = j + e*POINTS_PER_SEARCH;
+                            if (out[i] > 0)
                             {
                                 assert(i > 0);
                                 targets[e] = {ps.col(i - 1), ps.col(i)};
                                 break;
                             }
-                        }
-                        // Special-case for final point in the search, working
-                        // around numerical issues where different evaluators
-                        // disagree with whether points are inside or outside.
-                        else if (j == POINTS_PER_SEARCH - 1)
-                        {
-                            targets[e] = {ps.col(i - 1), ps.col(i)};
-                            break;
+                            else if (out[i] == 0)
+                            {
+                                Eigen::Vector3d pos;
+                                pos << ps.col(i), region.perp;
+                                if (!eval->feature.isInside(
+                                            pos.template cast<float>(), tape))
+                                {
+                                    assert(i > 0);
+                                    targets[e] = {ps.col(i - 1), ps.col(i)};
+                                    break;
+                                }
+                            }
+                            // Special-case for final point in the search,
+                            // working around numerical issues where
+                            // different evaluators disagree with whether
+                            // points are inside or outside.
+                            else if (j == POINTS_PER_SEARCH - 1)
+                            {
+                                targets[e] = {ps.col(i - 1), ps.col(i)};
+                                break;
+                            }
                         }
                     }
                 }
             }
 
-            // Reset mass point and intersections
-            _mass_point = _mass_point.Zero();
-            intersections.clear();
-
-            // Store mass point and prepare for a bulk evaluation
+            // Now, we evaluate the distance field (value + derivatives) at
+            // each intersection (which is associated with a specific edge).
             static_assert(_edges(N) * 2 <= ArrayEvaluator::N,
                           "Too many results");
-            for (unsigned i=0; i < target_count; ++i)
+            if (eval_count)
             {
-                set(targets[i].first, 2*i);
-                set(targets[i].second, 2*i + 1);
-            }
-
-            // Evaluate values and derivatives
-            auto ds = eval->array.derivs(2 * target_count);
-            auto ambig = eval->array.getAmbiguous(2 * target_count);
-
-            // Iterate over all inside-outside pairs, storing the number
-            // of intersections before each inside node (in prev_size), then
-            // checking the rank of the pair after each outside node based
-            // on the accumulated intersections.
-            size_t prev_size;
-            for (unsigned i=0; i < 2 * target_count; ++i)
-            {
-                if (!(i & 1))
+                for (unsigned i=0; i < eval_count; ++i)
                 {
-                    prev_size = intersections.size();
+                    set(targets[i].first, 2*i);
+                    set(targets[i].second, 2*i + 1);
                 }
+                auto ds = eval->array.derivs(2 * eval_count, tape);
+                auto ambig = eval->array.getAmbiguous(2 * eval_count, tape);
 
-                if (!ambig(i))
+                // Iterate over all inside-outside pairs, storing the number
+                // of intersections before each inside node (in prev_size),
+                // then checking the rank of the pair after each outside
+                // node based on the accumulated intersections.
+                for (unsigned i=0; i < 2 * eval_count; ++i)
                 {
-                    const Eigen::Array<double, N, 1> derivs = ds.col(i)
-                        .template cast<double>().template head<N>();
-                    const double norm = derivs.matrix().norm();
+                    // This is the position associated with the intersection
+                    // being investigated.
+                    Eigen::Vector3d pos;
+                    pos << ((i & 1) ? targets[i/2].second
+                                    : targets[i/2].first),
+                           region.perp;
 
-                    // Find normalized derivatives and distance value
-                    Eigen::Matrix<double, N + 1, 1> dv;
-                    dv << derivs / norm, ds.col(i).w() / norm;
-                    if (!dv.array().isNaN().any())
+                    // If this position is unambiguous, then we can use the
+                    // derivatives value calculated and stored in ds.
+                    if (!ambig(i))
                     {
-                        intersections.push_back({
-                            (i & 1) ? targets[i/2].second : targets[i/2].first,
-                            dv});
-                    }
-                }
-                else
-                {
-                    // Load the ambiguous position and find its features
-                    Eigen::Vector3f pos;
-                    pos << ((i & 1) ? targets[i/2].second : targets[i/2].first)
-                                .template cast<float>(),
-                           region.perp.template cast<float>();
-                    const auto fs = eval->feature.featuresAt(pos);
-
-                    for (auto& f : fs)
-                    {
-                        // Evaluate feature-specific distance and
-                        // derivatives value at this particular point
-                        eval->feature.push(f);
-
-                        const auto ds = eval->feature.deriv(pos);
-
-                        // Unpack 3D derivatives into XTree-specific
-                        // dimensionality, and find normal.
-                        const Eigen::Array<double, N, 1> derivs = ds
-                            .template head<N>()
-                            .template cast<double>();
+                        const Eigen::Array<double, N, 1> derivs = ds.col(i)
+                            .template cast<double>().template head<N>();
                         const double norm = derivs.matrix().norm();
 
                         // Find normalized derivatives and distance value
-                        Eigen::Matrix<double, N + 1, 1> dv;
-                        dv << derivs / norm, ds.w() / norm;
-                        if (!dv.array().isNaN().any())
+                        Eigen::Matrix<double, N, 1> dv = derivs / norm;
+                        if (dv.array().isFinite().all())
                         {
-                            intersections.push_back({
-                                (i & 1) ? targets[i/2].second
-                                        : targets[i/2].first, dv});
+                            intersections[eval_edges[i/2]]
+                                .push_back({pos.template head<N>(),
+                                            dv, ds.col(i).w() / norm});
                         }
-                        eval->feature.pop();
                     }
-                }
-
-                if (i & 1)
-                {
-                    // If every intersection was NaN (?!), use rank 0;
-                    // otherwise, figure out how many normals diverge
-                    if (prev_size == intersections.size())
-                    {
-                        ranks[i / 2] = 0;
-                    }
+                    // Otherwise, we need to use the feature-finding special
+                    // case to find all possible derivatives at this point.
                     else
                     {
-                        ranks[i / 2] = 1;
-                        Vec prev_normal = intersections[prev_size]
-                            .second
-                            .template head<N>();
-                        for (unsigned p=prev_size + 1;
-                                      p < intersections.size(); ++p)
+                        const auto fs = eval->feature.features(
+                                pos.template cast<float>(), tape);
+
+                        for (auto& f : fs)
                         {
-                            // Accumulate rank based on cosine distance
-                            ranks[i / 2] += intersections[p]
-                                .second
+                            // Unpack 3D derivatives into XTree-specific
+                            // dimensionality, and find normal.
+                            const Eigen::Array<double, N, 1> derivs = f
                                 .template head<N>()
-                                .dot(prev_normal) < 0.9;
+                                .template cast<double>();
+                            const double norm = derivs.matrix().norm();
+
+                            // Find normalized derivatives and distance
+                            // value (from the earlier evaluation)
+                            Eigen::Matrix<double, N, 1> dv = derivs / norm;
+                            if (dv.array().isFinite().all())
+                            {
+                                intersections[eval_edges[i/2]]
+                                    .push_back({pos.template head<N>(),
+                                            dv, ds.col(i).w() / norm});
+                            }
                         }
                     }
                 }
             }
+        }
+        // At this point, every [intersections[e] for e in edges] should be
+        // populated with a list of Intersection objects, whether taken
+        // from a neighbor or calculated in the code above.
 
-            {   // Build the mass point from max-rank intersections
-                const int max_rank = *std::max_element(
-                        ranks.begin(), ranks.end());
-                for (unsigned i=0; i < target_count; ++i)
+        // Each edge, which contains one or more intersections, is assigned
+        // a rank based on the normals of those intersections.
+        std::array<int, _edges(N)> edge_ranks;
+        std::fill(edge_ranks.begin(), edge_ranks.end(), -1);
+        for (unsigned i=0; i < edge_count; ++i)
+        {
+            // If every intersection was NaN (?!), use rank 0;
+            // otherwise, figure out how many normals diverge
+            IntersectionVec<N> prev_normals;
+            edge_ranks[i] = 0;
+
+            for (const auto& t : intersections[edges[i]])
+            {
+                bool matched = false;
+                for (auto& v : prev_normals)
                 {
-                    assert(ranks[i] != -1);
-                    if (ranks[i] == max_rank)
+                    matched |= (t.deriv.dot(v.deriv) >= 0.9);
+                }
+                if (!matched)
+                {
+                    edge_ranks[i]++;
+                    prev_normals.push_back(t);
+                }
+            }
+        }
+        _mass_point = _mass_point.Zero();
+
+
+        {   // Build the mass point from max-rank intersections
+            const int max_rank = *std::max_element(
+                    edge_ranks.begin(), edge_ranks.end());
+            for (unsigned i=0; i < edge_count; ++i)
+            {
+                assert(edge_ranks[i] != -1);
+                if (edge_ranks[i] == max_rank)
+                {
+                    // Accumulate this intersection in the mass point
+                    // by storing the first and last intersection position
+                    // (which are guaranteed by construction to be a
+                    // just-inside and just-outside position, respectively)
+                    Eigen::Matrix<double, N + 1, 1> mp;
+                    const auto& inter = intersections[edges[i]];
+                    const auto size = inter.size();
+                    if (size >= 1)
                     {
-                        // Accumulate this intersection in the mass point
-                        Eigen::Matrix<double, N + 1, 1> mp;
-                        mp << targets[i].first, 1;
+                        mp << intersections[edges[i]][0].pos, 1;
                         _mass_point += mp;
-                        mp << targets[i].second, 1;
+                        mp << intersections[edges[i]][size - 1].pos, 1;
                         _mass_point += mp;
                     }
                 }
             }
-
-            // Now, we'll unpack into A and b matrices
-            //
-            //  The A matrix is of the form
-            //  [n1x, n1y, n1z]
-            //  [n2x, n2y, n2z]
-            //  [n3x, n3y, n3z]
-            //  ...
-            //  (with one row for each sampled point's normal)
-            Eigen::Matrix<double, Eigen::Dynamic, N> A(intersections.size(), N);
-
-            //  The b matrix is of the form
-            //  [p1 . n1]
-            //  [p2 . n2]
-            //  [p3 . n3]
-            //  ...
-            //  (with one row for each sampled point)
-            Eigen::Matrix<double, Eigen::Dynamic, 1> b(intersections.size(), 1);
-
-            // Load samples into the QEF arrays
-            //
-            // Since we're deliberately sampling on either side of the
-            // intersection, we subtract out the distance-field value
-            // to make the math work out.
-            for (unsigned i=0; i < intersections.size(); ++i)
-            {
-                A.row(i) << intersections[i].second
-                                            .template head<N>()
-                                            .transpose();
-                b(i) = A.row(i).dot(intersections[i].first) -
-                       intersections[i].second(N);
-            }
-
-            // Save compact QEF matrices
-            auto At = A.transpose().eval();
-            AtA = At * A;
-            AtB = At * b;
-            BtB = b.transpose() * b;
-
-            // Find the vertex position, storing into the appropriate column
-            // of the vertex array and ignoring the error result (because
-            // this is the bottom of the recursion)
-            findVertex(vertex_count++);
         }
+
+        // Count how many intersections are stored, across all of the
+        // relevant edges for this vertex.  We use this data to determine
+        // the size of the arrays for QEF solving.
+        size_t rows = 0;
+        for (unsigned i=0; i < edge_count; ++i)
+        {
+            rows += intersections[edges[i]].size();
+        }
+
+        // Now, we'll unpack into A and b matrices
+        //
+        //  The A matrix is of the form
+        //  [n1x, n1y, n1z]
+        //  [n2x, n2y, n2z]
+        //  [n3x, n3y, n3z]
+        //  ...
+        //  (with one row for each sampled point's normal)
+        Eigen::Matrix<double, Eigen::Dynamic, N> A(rows, N);
+
+        //  The b matrix is of the form
+        //  [p1 . n1]
+        //  [p2 . n2]
+        //  [p3 . n3]
+        //  ...
+        //  (with one row for each sampled point)
+        Eigen::Matrix<double, Eigen::Dynamic, 1> b(rows, 1);
+
+        // Load samples into the QEF arrays
+        //
+        // Since we're deliberately sampling on either side of the
+        // intersection, we subtract out the distance-field value
+        // to make the math work out.
+        unsigned r=0;
+        for (unsigned i=0; i < edge_count; ++i)
+        {
+            for (unsigned j=0; j < intersections[edges[i]].size(); ++j)
+            {
+                A.row(r) << intersections[edges[i]][j].deriv
+                                            .transpose();
+                b(r) = A.row(r).dot(intersections[edges[i]][j].pos) -
+                       intersections[edges[i]][j].value;
+                r++;
+            }
+        }
+
+        // Save compact QEF matrices
+        auto At = A.transpose().eval();
+        AtA = At * A;
+        AtB = At * b;
+        BtB = b.transpose() * b;
+
+        // Find the vertex position, storing into the appropriate column
+        // of the vertex array and ignoring the error result (because
+        // this is the bottom of the recursion)
+        findVertex(vertex_count++);
     }
 
-    // ...and we're done.
-    eval->interval.pop();
+    done.store(true);
+}
+
+template <unsigned N>
+void XTree<N>::buildCornerMask()
+{
+    for (unsigned i=0; i < children.size(); ++i)
+    {
+        assert(corners[i] != Interval::UNKNOWN);
+        corner_mask |= (corners[i] == Interval::FILLED) << i;
+    }
+}
+
+template <unsigned N>
+bool XTree<N>::collectChildren(XTreeEvaluator* eval, Tape::Handle tape,
+                               double max_err)
+{
+    // Check all the children, returning false if we're not done
+    for (unsigned i=0; i < children.size(); ++i)
+    {
+        auto ptr = children[i].load();
+        if (!ptr || !ptr->done.load())
+        {
+            return false;
+        }
+    }
+    // If we've made it this far but done is already set, then another
+    // thread is partway through running collectChildren and we
+    // shouldn't interfere.
+    if (done.exchange(true))
+    {
+        return false;
+    }
+
+    bool all_empty = true;
+    bool all_full  = true;
+
+    // Update corner and filled / empty state from children
+    for (uint8_t i=0; i < children.size(); ++i)
+    {
+        auto c = children[i].load();
+        assert(c != nullptr);
+
+        // Grab corner values from children
+        corners[i] = c->corners[i];
+        corner_positions.row(i) = c->corner_positions.row(i);
+
+        all_empty &= c->type == Interval::EMPTY;
+        all_full  &= c->type == Interval::FILLED;
+    }
+
+    type = all_empty ? Interval::EMPTY
+         : all_full  ? Interval::FILLED : Interval::AMBIGUOUS;
+
+    buildCornerMask();
+
+    // If this cell is unambiguous, then forget all its branches and return
+    if (type == Interval::FILLED || type == Interval::EMPTY)
+    {
+        deleteBranches();
+        manifold = true;
+        return true;
+    }
+
+    // Store this tree's depth as a function of its children
+    level = std::accumulate(children.begin(), children.end(), (unsigned)0,
+        [](const unsigned& a, const std::atomic<XTree<N>*>& b)
+        { return std::max(a, b.load()->level);} ) + 1;
+
+    // If any children are branches, then we can't collapse
+    if (std::any_of(children.begin(), children.end(),
+                    [](const std::atomic<XTree<N>*>& o)
+                    { return o.load()->isBranch(); }))
+    {
+        return true;
+    }
+
+    //  This conditional implements the three checks described in
+    //  [Ju et al, 2002] in the section titled
+    //      "Simplification with topology safety"
+    manifold = cornersAreManifold() &&
+        std::all_of(children.begin(), children.end(),
+                [](const std::atomic<XTree<N>*>& o)
+                { return o.load()->manifold; }) &&
+        leafsAreManifold();
+
+    // If we're not manifold, then we can't collapse
+    if (!manifold)
+    {
+        return true;
+    }
+
+    // Populate the feature rank as the maximum of all children
+    // feature ranks (as seen in DC: The Secret Sauce)
+    rank = std::accumulate(
+            children.begin(), children.end(), (unsigned)0,
+            [](unsigned a, const std::atomic<XTree<N>*>& b)
+                { return std::max(a, b.load()->rank);} );
+
+    // Accumulate the mass point and QEF matrices
+    for (const auto& c_ : children)
+    {
+        auto c = c_.load();
+        assert(c != nullptr);
+        if (c->rank == rank)
+        {
+            _mass_point += c->_mass_point;
+        }
+        AtA += c->AtA;
+        AtB += c->AtB;
+        BtB += c->BtB;
+    }
+    assert(region.contains(massPoint()));
+
+    // If the vertex error is below a threshold, and the vertex
+    // is well-placed in the distance field, then convert into
+    // a leaf by erasing all of the child branches
+    if (findVertex(vertex_count++) < max_err &&
+        fabs(eval->feature.eval(
+                vert3().template cast<float>(),
+                Tape::getBase(tape, vert3().template cast<float>())))
+            < max_err)
+    {
+        deleteBranches();
+    }
+    else
+    {
+        vertex_count = 0;
+    }
+
+    return true;
+}
+
+template <unsigned N>
+void XTree<N>::deleteBranches()
+{
+    std::for_each(children.begin(), children.end(),
+        [](std::atomic<XTree<N>*>& o) { delete o.exchange(nullptr); });
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -673,207 +760,5 @@ typename XTree<N>::Vec XTree<N>::massPoint() const
 {
     return _mass_point.template head<N>() / _mass_point(N);
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// Specializations for quadtree
-template <>
-bool XTree<2>::leafsAreManifold() const
-{
-    /*  See detailed comment in Octree::leafTopology */
-    const bool edges_safe =
-        (child(0)->cornerState(Axis::X) == cornerState(0) ||
-         child(0)->cornerState(Axis::X) == cornerState(Axis::X))
-    &&  (child(0)->cornerState(Axis::Y) == cornerState(0) ||
-         child(0)->cornerState(Axis::Y) == cornerState(Axis::Y))
-    &&  (child(Axis::X)->cornerState(Axis::X|Axis::Y) == cornerState(Axis::X) ||
-         child(Axis::X)->cornerState(Axis::X|Axis::Y) == cornerState(Axis::X|Axis::Y))
-    &&  (child(Axis::Y)->cornerState(Axis::Y|Axis::X) == cornerState(Axis::Y) ||
-         child(Axis::Y)->cornerState(Axis::Y|Axis::X) == cornerState(Axis::Y|Axis::X));
-
-    const bool faces_safe =
-        (child(0)->cornerState(Axis::Y|Axis::X) == cornerState(0) ||
-         child(0)->cornerState(Axis::Y|Axis::X) == cornerState(Axis::Y) ||
-         child(0)->cornerState(Axis::Y|Axis::X) == cornerState(Axis::X) ||
-         child(0)->cornerState(Axis::Y|Axis::X) == cornerState(Axis::Y|Axis::X));
-
-    return edges_safe && faces_safe;
-}
-
-template <>
-bool XTree<2>::cornersAreManifold() const
-{
-    const static bool corner_table[] =
-        {1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1};
-    return corner_table[corner_mask];
-}
-
-template <>
-const std::vector<std::pair<uint8_t, uint8_t>>& XTree<2>::edges() const
-{
-    static const std::vector<std::pair<uint8_t, uint8_t>> es =
-        {{0, Axis::X}, {0, Axis::Y},
-         {Axis::X, Axis::X|Axis::Y}, {Axis::Y, Axis::Y|Axis::X}};
-    return es;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Specializations for octree
-template <>
-bool XTree<3>::leafsAreManifold() const
-{
-    /*  - The sign in the middle of a coarse edge must agree with the sign of at
-     *    least one of the edge’s two endpoints.
-     *  - The sign in the middle of a coarse face must agree with the sign of at
-     *    least one of the face’s four corners.
-     *  - The sign in the middle of a coarse cube must agree with the sign of at
-     *    least one of the cube’s eight corners.
-     *  [Ju et al, 2002]    */
-
-    // Check the signs in the middle of leaf cell edges
-    const bool edges_safe =
-        (child(0)->cornerState(Axis::Z) == cornerState(0) ||
-         child(0)->cornerState(Axis::Z) == cornerState(Axis::Z))
-    &&  (child(0)->cornerState(Axis::X) == cornerState(0) ||
-         child(0)->cornerState(Axis::X) == cornerState(Axis::X))
-    &&  (child(0)->cornerState(Axis::Y) == cornerState(0) ||
-         child(0)->cornerState(Axis::Y) == cornerState(Axis::Y))
-
-    &&  (child(Axis::X)->cornerState(Axis::X|Axis::Y) == cornerState(Axis::X) ||
-         child(Axis::X)->cornerState(Axis::X|Axis::Y) == cornerState(Axis::X|Axis::Y))
-    &&  (child(Axis::X)->cornerState(Axis::X|Axis::Z) == cornerState(Axis::X) ||
-         child(Axis::X)->cornerState(Axis::X|Axis::Z) == cornerState(Axis::X|Axis::Z))
-
-    &&  (child(Axis::Y)->cornerState(Axis::Y|Axis::X) == cornerState(Axis::Y) ||
-         child(Axis::Y)->cornerState(Axis::Y|Axis::X) == cornerState(Axis::Y|Axis::X))
-    &&  (child(Axis::Y)->cornerState(Axis::Y|Axis::Z) == cornerState(Axis::Y) ||
-         child(Axis::Y)->cornerState(Axis::Y|Axis::Z) == cornerState(Axis::Y|Axis::Z))
-
-    &&  (child(Axis::X|Axis::Y)->cornerState(Axis::X|Axis::Y|Axis::Z) ==
-                               cornerState(Axis::X|Axis::Y) ||
-         child(Axis::X|Axis::Y)->cornerState(Axis::X|Axis::Y|Axis::Z) ==
-                               cornerState(Axis::X|Axis::Y|Axis::Z))
-
-    &&  (child(Axis::Z)->cornerState(Axis::Z|Axis::X) == cornerState(Axis::Z) ||
-         child(Axis::Z)->cornerState(Axis::Z|Axis::X) == cornerState(Axis::Z|Axis::X))
-    &&  (child(Axis::Z)->cornerState(Axis::Z|Axis::Y) == cornerState(Axis::Z) ||
-         child(Axis::Z)->cornerState(Axis::Z|Axis::Y) == cornerState(Axis::Z|Axis::Y))
-
-    &&  (child(Axis::Z|Axis::X)->cornerState(Axis::Z|Axis::X|Axis::Y) ==
-                               cornerState(Axis::Z|Axis::X) ||
-         child(Axis::Z|Axis::X)->cornerState(Axis::Z|Axis::X|Axis::Y) ==
-                               cornerState(Axis::Z|Axis::X|Axis::Y))
-
-    &&  (child(Axis::Z|Axis::Y)->cornerState(Axis::Z|Axis::Y|Axis::X) ==
-                               cornerState(Axis::Z|Axis::Y) ||
-         child(Axis::Z|Axis::Y)->cornerState(Axis::Z|Axis::Y|Axis::X) ==
-                               cornerState(Axis::Z|Axis::Y|Axis::X));
-
-    const bool faces_safe =
-        (child(0)->cornerState(Axis::X|Axis::Z) == cornerState(0) ||
-         child(0)->cornerState(Axis::X|Axis::Z) == cornerState(Axis::X) ||
-         child(0)->cornerState(Axis::X|Axis::Z) == cornerState(Axis::Z) ||
-         child(0)->cornerState(Axis::X|Axis::Z) == cornerState(Axis::X|Axis::Z))
-    &&  (child(0)->cornerState(Axis::Y|Axis::Z) == cornerState(0) ||
-         child(0)->cornerState(Axis::Y|Axis::Z) == cornerState(Axis::Y) ||
-         child(0)->cornerState(Axis::Y|Axis::Z) == cornerState(Axis::Z) ||
-         child(0)->cornerState(Axis::Y|Axis::Z) == cornerState(Axis::Y|Axis::Z))
-    &&  (child(0)->cornerState(Axis::Y|Axis::X) == cornerState(0) ||
-         child(0)->cornerState(Axis::Y|Axis::X) == cornerState(Axis::Y) ||
-         child(0)->cornerState(Axis::Y|Axis::X) == cornerState(Axis::X) ||
-         child(0)->cornerState(Axis::Y|Axis::X) == cornerState(Axis::Y|Axis::X))
-
-    && (child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::X) == cornerState(Axis::X) ||
-        child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::X) == cornerState(Axis::X|Axis::Z) ||
-        child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::X) == cornerState(Axis::X|Axis::Y) ||
-        child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::X) ==
-                                     cornerState(Axis::X|Axis::Y|Axis::Z))
-    && (child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::Y) == cornerState(Axis::Y) ||
-        child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::Y) == cornerState(Axis::Y|Axis::Z) ||
-        child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::Y) == cornerState(Axis::Y|Axis::X) ||
-        child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::Y) ==
-                                     cornerState(Axis::Y|Axis::Z|Axis::X))
-    && (child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::Z) == cornerState(Axis::Z) ||
-        child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::Z) == cornerState(Axis::Z|Axis::Y) ||
-        child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::Z) == cornerState(Axis::Z|Axis::X) ||
-        child(Axis::X|Axis::Y|Axis::Z)->cornerState(Axis::Z) ==
-                                     cornerState(Axis::Z|Axis::Y|Axis::X));
-
-    const bool center_safe =
-        child(0)->cornerState(Axis::X|Axis::Y|Axis::Z) == cornerState(0) ||
-        child(0)->cornerState(Axis::X|Axis::Y|Axis::Z) == cornerState(Axis::X) ||
-        child(0)->cornerState(Axis::X|Axis::Y|Axis::Z) == cornerState(Axis::Y) ||
-        child(0)->cornerState(Axis::X|Axis::Y|Axis::Z) == cornerState(Axis::X|Axis::Y) ||
-        child(0)->cornerState(Axis::X|Axis::Y|Axis::Z) == cornerState(Axis::Z) ||
-        child(0)->cornerState(Axis::X|Axis::Y|Axis::Z) == cornerState(Axis::Z|Axis::X) ||
-        child(0)->cornerState(Axis::X|Axis::Y|Axis::Z) == cornerState(Axis::Z|Axis::Y) ||
-        child(0)->cornerState(Axis::X|Axis::Y|Axis::Z) == cornerState(Axis::Z|Axis::X|Axis::Y);
-
-    return edges_safe && faces_safe && center_safe;
-}
-
-template <>
-bool XTree<3>::cornersAreManifold() const
-{
-    /* The code to generate the table is given below:
-    def safe(index):
-        f = [(index & (1 << i)) != 0 for i in range(8)]
-        edges = [(0,1), (0,2), (2,3), (1,3),
-                 (4,5), (4,6), (6,7), (5,7),
-                 (0,4), (2,6), (1,5), (3,7)]
-        def merge(a, b):
-            merged = [(e[0] if e[0] != a else b,
-                       e[1] if e[1] != a else b) for e in edges]
-            return [e for e in merged if e[0] != e[1]]
-        while True:
-            for e in edges:
-                if f[e[0]] == f[e[1]]:
-                    edges = merge(e[0], e[1])
-                    break
-            else:
-                break
-        s = set(map(lambda t: tuple(sorted(t)),edges))
-        return len(s) <= 1
-    out = ""
-    for i,s in enumerate([safe(i) for i in range(256)]):
-        if out == "": out += "{"
-        else: out += ","
-        if i and i % 32 == 0:
-            out += '\n '
-        if s: out += "1"
-        else: out += "0"
-    out += "}"
-    print(out)
-    */
-    const static bool corner_table[] =
-        {1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,1,0,1,0,1,0,1,0,0,0,1,0,1,0,1,
-         1,0,1,1,0,0,0,1,0,0,1,1,0,0,1,1,1,1,1,1,0,1,0,1,0,0,1,1,0,0,0,1,
-         1,0,0,0,1,1,0,1,0,0,0,0,1,1,1,1,1,1,0,1,1,1,0,1,0,0,0,0,1,1,0,1,
-         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,1,0,0,0,0,0,0,0,1,
-         1,0,0,0,0,0,0,0,1,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-         1,0,1,1,0,0,0,0,1,0,1,1,1,0,1,1,1,1,1,1,0,0,0,0,1,0,1,1,0,0,0,1,
-         1,0,0,0,1,1,0,0,1,0,1,0,1,1,1,1,1,1,0,0,1,1,0,0,1,0,0,0,1,1,0,1,
-         1,0,1,0,1,0,0,0,1,0,1,0,1,0,1,1,1,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1};
-    return corner_table[corner_mask];
-}
-
-template <>
-const std::vector<std::pair<uint8_t, uint8_t>>& XTree<3>::edges() const
-{
-    static const std::vector<std::pair<uint8_t, uint8_t>> es =
-        {{0, Axis::X}, {0, Axis::Y}, {0, Axis::Z},
-         {Axis::X, Axis::X|Axis::Y}, {Axis::X, Axis::X|Axis::Z},
-         {Axis::Y, Axis::Y|Axis::X}, {Axis::Y, Axis::Y|Axis::Z},
-         {Axis::X|Axis::Y, Axis::X|Axis::Y|Axis::Z},
-         {Axis::Z, Axis::Z|Axis::X}, {Axis::Z, Axis::Z|Axis::Y},
-         {Axis::Z|Axis::X, Axis::Z|Axis::X|Axis::Y},
-         {Axis::Z|Axis::Y, Axis::Z|Axis::Y|Axis::X}};
-    return es;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-// Explicit initialization of templates
-template class XTree<2>;
-template class XTree<3>;
 
 }   // namespace Kernel

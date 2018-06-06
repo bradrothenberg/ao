@@ -58,6 +58,30 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
          (circle r (vec2 (+ (.x a) r) (- (.y b) r)))
          (circle r (vec2 (- (.x b) r) (+ (.y a) r)))))
 
+(define* (rectangle-centered-exact b #:optional (c #[0 0 0]))
+  "rectangle-centered-exact #[width height]
+  Constructs an exact-field rectangle at the origin"
+  (move
+    (lambda-shape (x y z)
+      (let ((d (- #[(abs x) (abs y)] (/ b 2))))
+           (+ (min (max (.x d) (.y d)) 0)
+              (norm #[(max (.x d) 0) (max (.y d) 0)]))))
+  c)
+)
+(export rectangle-centered-exact)
+
+(define-public (rectangle-exact a b)
+  "rectangle-exact #[xmin ymin] #[xmax ymax]
+  Constructs a rectangle from an exact distance field"
+  (let ((size (- b a))
+        (center (/ (+ a b) 2)))
+    (rectangle-centered-exact size center)))
+
+(define-public (rounded-rectangle-exact a b r)
+  "rounded-rectangle-exact #[xmin ymin] #[xmax ymax] r
+  A rectangle with rounded corners, with an exact distance field"
+  (offset (rectangle-exact (+ a r) (- b r)) r))
+
 (define-public (triangle a b c)
   "triangle #[x0 y0] #[x1 y1] #[x2 y2]
   A 2D triangle"
@@ -73,11 +97,48 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define-public (box a b)
-  "box #[xmin ymin zmin] #[xmax ymax zmax]
-  A box with the given bounds"
+(define-public (box-mitred a b)
+  "box-mitred #[xmin ymin zmin] #[xmax ymax zmax]
+  A box with the given bounds, that will stay creased
+  as it's expanded by other functions"
   (extrude-z (rectangle a b) (.z a) (.z b)))
-(define-public cube box)
+(define-public cube box-mitred)
+(define-public box box-mitred)
+
+(define* (box-mitred-centered s #:optional (m #[0 0 0]))
+  "box-mitred-centered #[xsize ysize zsize] [#[x0 y0 z0]]
+  A box with the given size, centered around the given point,
+  that will stay creased as it's expanded by other functions"
+  (box-mitred (- m (/ s 2)) (+ m (/ s 2)))
+)
+(export box-mitred-centered)
+(define-public box-centered box-mitred-centered)
+
+(define* (box-exact-centered size #:optional (orig #[0 0 0]))
+  "box-exact-centered #[xsize ysize zsize] [#[x0 y0 z0]]
+  A box with the given size, centered around the given point,
+  that will become rounder as it's expanded by other functions"
+  (lambda-shape (x y z)
+    (let (
+      (dx (- (abs (- x (.x orig))) (/ (.x size) 2)))
+      (dy (- (abs (- y (.y orig))) (/ (.y size) 2)))
+      (dz (- (abs (- z (.z orig))) (/ (.z size) 2)))
+    )
+      (+
+        (min 0 (max dx dy dz))
+        (norm #[(max dx 0) (max dy 0) (max dz 0)])
+      )
+    )
+  )
+)
+(export box-exact-centered)
+
+(define-public (box-exact bmin bmax)
+  "box-exact #[xmin ymin zmin] #[xmax ymax zmax]
+  A box with the given bounds, that will become rounder
+  as it's expanded by other functions"
+  (box-exact-centered (- bmax bmin) (/ (+ bmax bmin) 2))
+)
 
 (define* (sphere r #:optional (center #[0 0 0]))
   "sphere r [#[x y z]]
@@ -137,8 +198,8 @@ Create a volume-filling gyroid with the given periods and thickness"
                              (cos (/ x x_factor))
                              )
                           )
-                         ) thickness
-                           )
+                         ) (- thickness)
+                       )
     ))
 
 (define-public (rounded-box a b r)

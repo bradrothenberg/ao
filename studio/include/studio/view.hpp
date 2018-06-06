@@ -28,7 +28,6 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "studio/bars.hpp"
 #include "studio/busy.hpp"
 #include "studio/camera.hpp"
-#include "studio/icosphere.hpp"
 #include "studio/shape.hpp"
 #include "studio/settings.hpp"
 
@@ -144,7 +143,6 @@ protected:
     BBox bbox;
     Busy busy;
     Bars bars;
-    Icosphere ico;
 
     void mouseMoveEvent(QMouseEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
@@ -186,11 +184,15 @@ protected:
     /*  Data to handle direct modification of shapes */
     QVector3D drag_start;
     QVector3D drag_dir;
-    QScopedPointer<Kernel::JacobianEvaluator> drag_eval;
+    std::pair<std::unique_ptr<Kernel::JacobianEvaluator>,
+              std::shared_ptr<Kernel::Tape>> drag_eval;
     Shape* drag_target=nullptr;
     bool drag_valid=false;
     Shape* hover_target=nullptr;
 
     QVector3D cursor_pos;
     bool cursor_pos_valid=false;
+
+    /*  Set to true on the first draw, if the OpenGL version is new enough */
+    bool gl_checked=false;
 };

@@ -16,32 +16,35 @@ You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
+#include <Eigen/Geometry>
+
 #include "catch.hpp"
 
-#include "libfive/tree/template.hpp"
+#include "libfive/tree/tree.hpp"
+#include "libfive/eval/deck.hpp"
 
 using namespace Kernel;
 
-TEST_CASE("Template::serialize")
+TEST_CASE("Deck::num_clauses")
 {
-    SECTION("With a name")
-    {
-        auto a = Template(min(Tree::X(), Tree::Y()));
-        a.name = "hi";
-        auto out = a.serialize();
-        std::vector<uint8_t> expected =
-            {'T', '"', 'h', 'i', '"', '"', '"', Opcode::VAR_X, Opcode::VAR_Y, Opcode::MIN, 1, 0, 0, 0, 0, 0, 0, 0};
-        REQUIRE(out == expected);
-    }
+    Deck t(Tree::X() + 1);
+    REQUIRE(t.num_clauses == 5); // X, Y, Z, 1, +
+}
 
-    SECTION("String escaping")
-    {
-        auto a = Template(min(Tree::X(), Tree::Y()));
-        a.name = "hi";
-        a.doc = "\"\\";
-        auto out = a.serialize();
-        std::vector<uint8_t> expected =
-            {'T', '"', 'h', 'i', '"', '"', '\\', '"', '\\', '\\', '"', Opcode::VAR_X, Opcode::VAR_Y, Opcode::MIN, 1, 0, 0, 0, 0, 0, 0, 0};
-        REQUIRE(out == expected);
-    }
+TEST_CASE("Deck::XYZ")
+{
+    Deck t(Tree::X() + 1);
+    REQUIRE(t.X == 3);
+    REQUIRE(t.Y == 4);
+    REQUIRE(t.Z == 5);
+}
+
+TEST_CASE("Deck::constants")
+{
+    Deck t(Tree::X() + 5);
+    REQUIRE(t.constants.size() == 1);
+
+    CAPTURE(t.constants.begin()->first);
+    CAPTURE(t.constants.begin()->second);
+    REQUIRE(t.constants.at(2) == 5.0f);
 }

@@ -31,17 +31,25 @@ if(APPLE)
     set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+# Work around an issue with Boost::Interval on OpenBSD
+if ("${CMAKE_SYSTEM_NAME}" STREQUAL "OpenBSD")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__USE_ISOC99")
+endif()
+
 ################################################################################
 # Find all packages here at the top level so we can print debugging info
-find_package(Qt5Core)
-find_package(Boost REQUIRED)
-find_package(PNG REQUIRED)
-
-if(APPLE)
+if(NOT MSVC)
+    find_package(Qt5Core)
+    find_package(Boost REQUIRED)
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(GUILE guile-2.2)
-    pkg_check_modules(EIGEN REQUIRED eigen3)
-endif(APPLE)
+    pkg_check_modules(GUILE guile-2.2>=2.2.1)
+    pkg_check_modules(EIGEN REQUIRED eigen3>=3.2.92)
+else()
+    find_package(eigen3 REQUIRED)
+    find_package(boost REQUIRED)
+    find_package(PNG REQUIRED)
+endif()
+
 
 if (UNIX AND NOT(APPLE))
     find_package(Threads REQUIRED)
@@ -74,6 +82,9 @@ else ()
 endif()
 
 ################################################################################
+
+# Set a flag to detect the case where users run CMake in the wrong directory
+set(LIBFIVE_BUILD_FROM_ROOT true)
 
 # Always build the kernel and test suite
 add_subdirectory(libfive)

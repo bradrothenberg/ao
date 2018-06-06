@@ -21,7 +21,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include <boost/algorithm/string/predicate.hpp>
 
 #include "libfive/render/brep/mesh.hpp"
-#include "libfive/render/brep/xtree.hpp"
+#include "libfive/render/brep/xtree_pool.hpp"
 #include "libfive/render/brep/dual.hpp"
 
 namespace Kernel {
@@ -107,29 +107,36 @@ void Mesh::load(const std::array<const XTree<3>*, 4>& ts)
 ////////////////////////////////////////////////////////////////////////////////
 
 std::unique_ptr<Mesh> Mesh::render(const Tree t, const Region<3>& r,
-                                   double min_feature, double max_err)
+                                   double min_feature, double max_err,
+                                   bool multithread)
 {
     std::atomic_bool cancel(false);
     std::map<Tree::Id, float> vars;
-    return render(t, vars, r, min_feature, max_err, cancel);
+    return render(t, vars, r, min_feature, max_err,
+                  multithread ? 8 : 1, cancel);
 }
 
 std::unique_ptr<Mesh> Mesh::render(
             const Tree t, const std::map<Tree::Id, float>& vars,
             const Region<3>& r, double min_feature, double max_err,
-            std::atomic_bool& cancel)
+            unsigned workers, std::atomic_bool& cancel)
 {
-    // Create the octree (multithreaded and cancellable)
-    return mesh(XTree<3>::build(
-            t, vars, r, min_feature, max_err, true, cancel), cancel);
+    std::vector<XTreeEvaluator, Eigen::aligned_allocator<XTreeEvaluator>> es;
+    es.reserve(workers);
+    for (unsigned i=0; i < workers; ++i)
+    {
+        es.emplace_back(XTreeEvaluator(t, vars));
+    }
+
+    return render(es.data(), r, min_feature, max_err, workers, cancel);
 }
 
 std::unique_ptr<Mesh> Mesh::render(
         XTreeEvaluator* es,
         const Region<3>& r, double min_feature, double max_err,
-        std::atomic_bool& cancel)
+        int workers, std::atomic_bool& cancel)
 {
-    return mesh(XTree<3>::build(es, r, min_feature, max_err, true, cancel),
+    return mesh(XTreePool<3>::build(es, r, min_feature, max_err, workers, cancel),
                 cancel);
 }
 
@@ -139,7 +146,7 @@ std::unique_ptr<Mesh> Mesh::mesh(std::unique_ptr<const XTree<3>> xtree,
     // Perform marching squares
     auto m = std::unique_ptr<Mesh>(new Mesh());
 
-    if (cancel.load())
+    if (cancel.load() || xtree.get() == nullptr)
     {
         return nullptr;
     }
@@ -207,8 +214,6 @@ bool Mesh::saveSTL(const std::string& filename,
       std::cerr << "IOError: " << filename << " could not be opened for writing." << std::endl;
       return false;
     }
-
-
     std::string header = "This is a binary STL exported from Ao.";
     // Write unused 80-char header
     for (auto h : header)

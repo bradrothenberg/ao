@@ -19,6 +19,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "catch.hpp"
 
 #include "libfive/tree/tree.hpp"
+
+#define ENABLE_FIND_BOUNDS_EXPERIMENTAL
 #include "libfive/solve/bounds.hpp"
 
 #include "util/shapes.hpp"
@@ -60,7 +62,6 @@ TEST_CASE("findBounds")
     SECTION("Moved circle")
     {
         auto s = move(circle(0.3f), {0.3f, 0.3f, 0.f});
-
         auto r = findBounds(s);
         CAPTURE(r.lower);
         CAPTURE(r.upper);

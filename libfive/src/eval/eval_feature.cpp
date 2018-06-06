@@ -17,106 +17,63 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "libfive/eval/eval_feature.hpp"
+#include "libfive/eval/deck.hpp"
+#include "libfive/eval/tape.hpp"
 
 namespace Kernel {
 
-FeatureEvaluator::FeatureEvaluator(std::shared_ptr<Tape> t)
-    : FeatureEvaluator(t, std::map<Tree::Id, float>())
+FeatureEvaluator::FeatureEvaluator(std::shared_ptr<Deck> d)
+    : FeatureEvaluator(d, std::map<Tree::Id, float>())
 {
     // Nothing to do here
 }
 
 FeatureEvaluator::FeatureEvaluator(
-        std::shared_ptr<Tape> t, const std::map<Tree::Id, float>& vars)
-    : DerivEvaluator(t, vars)
+        std::shared_ptr<Deck> t, const std::map<Tree::Id, float>& vars)
+    : PointEvaluator(t, vars), d(1, deck->num_clauses + 1)
 {
-    // Nothing to do here
-}
+    // Load the default derivatives
+    d(deck->X).push_back(Feature(Eigen::Vector3f(1, 0, 0)));
+    d(deck->Y).push_back(Feature(Eigen::Vector3f(0, 1, 0)));
+    d(deck->Z).push_back(Feature(Eigen::Vector3f(0, 0, 1)));
 
-Feature FeatureEvaluator::push(const Feature& feature)
-{
-    Feature out;
-    out.deriv = feature.deriv;
-
-    const auto& choices = feature.getChoices();
-    auto itr = choices.begin();
-
-    tape->push([&](Opcode::Opcode op, Clause::Id id, Clause::Id a, Clause::Id b)
+    // Set variables to have a single all-zero derivative
+    for (auto& v : t->vars.right)
     {
-        // First, check whether this is an ambiguous operation
-        // If it is, then there may be a choice for it in the feature
-        if (op == Opcode::MAX || op == Opcode::MIN)
-        {
-            if (f(a, 0) == f(b, 0) || a == b)
-            {
-                // Walk the iterator forwards until we find a match by id
-                // or hit the end of the feature
-                while (itr != choices.end() && itr->id < id) { itr++; }
+        d(v.second).push_back(Feature(Eigen::Vector3f::Zero()));
+    }
 
-                // Push either the choice + epsilon or the bare choice to the
-                // output feature, effectively pruning it to contain only the
-                // choices that are actually significant in this subtree.
-                if (itr != choices.end() && itr->id == id)
-                {
-                    if (feature.hasEpsilon(id))
-                    {
-                        out.pushRaw(*itr, feature.getEpsilon(id));
-                    }
-                    else
-                    {
-                        out.pushChoice(*itr);
-                    }
-
-                    return (itr->choice == 0) ? Tape::KEEP_A : Tape::KEEP_B;
-                }
-            }
-            return Tape::KEEP_BOTH;
-        }
-        else
-        {
-            return Tape::KEEP_ALWAYS;
-        }
-    }, Tape::FEATURE);
-
-    return out;
+    // Set constants to have a single all-zero derivative
+    for (auto& c : deck->constants)
+    {
+        d(c.first).push_back(Feature(Eigen::Vector3f::Zero()));
+    }
 }
 
 bool FeatureEvaluator::isInside(const Eigen::Vector3f& p)
 {
-    auto ds = deriv(p);
+    return isInside(p, deck->tape);
+}
+
+bool FeatureEvaluator::isInside(const Eigen::Vector3f& p,
+                                Tape::Handle tape)
+{
+    auto v = eval(p, tape);
 
     // Unambiguous cases
-    if (ds.w() < 0)
+    if (v < 0)
     {
         return true;
     }
-    else if (ds.w() > 0)
+    else if (v > 0)
     {
         return false;
-    }
-
-    // Special case to save time on non-ambiguous features: we can get both
-    // positive and negative values out if there's a non-zero gradient
-    // (same as single-feature case below).
-    {
-        bool ambig = false;
-        tape->walk(
-            [&](Opcode::Opcode op, Clause::Id /* id */, Clause::Id a, Clause::Id b)
-            {
-                ambig |= (op == Opcode::MIN || op == Opcode::MAX) &&
-                         (f(a) == f(b));
-            }, ambig);
-
-        if (!ambig)
-        {
-            return (ds.col(0).template head<3>().array() != 0).any();
-        }
     }
 
     // Otherwise, we need to handle the zero-crossing case!
 
     // First, we extract all of the features
-    auto fs = featuresAt(p);
+    auto fs = features_(p, tape);
 
     // If there's only a single feature, we can get both positive and negative
     // values out if it's got a non-zero gradient
@@ -133,102 +90,257 @@ bool FeatureEvaluator::isInside(const Eigen::Vector3f& p)
     bool neg = false;
     for (auto& f : fs)
     {
-        pos |= f.isCompatible(f.deriv);
-        neg |= f.isCompatible(-f.deriv);
+        pos |= f.check(f.deriv);
+        neg |= f.check(-f.deriv);
     }
     return !(pos && !neg);
-
 }
 
-std::list<Feature> FeatureEvaluator::featuresAt(const Eigen::Vector3f& p)
+const boost::container::small_vector<Feature, 4>&
+    FeatureEvaluator::features_(const Eigen::Vector3f& p)
 {
-    // The initial feature doesn't know any ambiguities
-    Feature feature;
-    std::list<Feature> todo = {feature};
-    std::list<Feature> done;
-    std::set<std::set<Feature::Choice>> seen;
+    return features_(p, deck->tape);
+}
 
-    // Load the location into the first results slot and evaluate
-    evalAndPush(p);
+const boost::container::small_vector<Feature, 4>&
+    FeatureEvaluator::features_(const Eigen::Vector3f& p,
+                                Tape::Handle tape)
+{
+    // Load the location into the results slot and evaluate point-wise
+    auto handle = evalAndPush(p, tape);
 
-    while (todo.size())
+    // Evaluate feature-wise
+    auto index = handle.second->rwalk(*this);
+
+    return d(index);
+}
+
+std::list<Eigen::Vector3f> FeatureEvaluator::features(const Eigen::Vector3f& p)
+{
+    return features(p, deck->tape);
+}
+
+std::list<Eigen::Vector3f> FeatureEvaluator::features(
+        const Eigen::Vector3f& p,
+        Tape::Handle tape)
+{
+    // Deduplicate and return the result
+    std::list<Eigen::Vector3f> out;
+    for (auto& o : features_(p, tape))
     {
-        // Take the most recent feature and scan for ambiguous min/max nodes
-        // (from the bottom up).  If we find such an ambiguous node, then push
-        // both versions to the feature (if compatible) and re-insert the
-        // augmented feature in the todo list; otherwise, move the feature
-        // to the done list.
-        auto feature = todo.front();
-        todo.pop_front();
+        if (std::find(out.begin(), out.end(), o.deriv) == out.end())
+        {
+            out.push_back(o.deriv);
+        }
+    }
+    return out;
+}
 
-        // Then, push into this feature
-        // (storing a minimized version of the feature)
-        auto f_ = push(feature);
+void FeatureEvaluator::operator()(Opcode::Opcode op, Clause::Id id,
+                                  Clause::Id a, Clause::Id b)
+{
+#define ov f(id)
+#define od d(id)
 
-        // Run a single evaluation of the value + derivatives
-        // The value will be the same, but derivatives may change
-        // depending on which feature we've pushed ourselves into
-        const Eigen::Vector3f ds = deriv(p).template head<3>();
+#define av f(a)
+#define _ads d(a)
+#define ad _ad.deriv
 
-        bool ambiguous = false;
-        tape->rwalk(
-            [&](Opcode::Opcode op, Clause::Id id, Clause::Id a, Clause::Id b)
+#define bv f(b)
+#define _bds d(b)
+#define bd _bd.deriv
+
+
+#define LOOP2 \
+    for (auto& _ad : _ads) \
+        for (auto& _bd : _bds)
+
+#define STORE2(expr) LOOP2 \
+    if (_ad.check(_bd)) \
+        od.push_back(Feature(expr, _ad, _bd));
+
+#define STORE1(expr) \
+    for (auto& _ad : _ads) \
+        od.push_back(Feature(expr, _ad));
+
+    od.clear();
+
+    switch (op) {
+        case Opcode::OP_ADD:
+            STORE2(ad + bd);
+            break;
+        case Opcode::OP_MUL:
+            // Product rule
+            STORE2(bd*av + ad*bv);
+            break;
+        case Opcode::OP_MIN:
+            if (av < bv || a == b)
             {
-                if ((op == Opcode::MIN || op == Opcode::MAX))
+                od = _ads;
+            }
+            else if (av > bv)
+            {
+                od = _bds;
+            }
+            else LOOP2
+            {
+                Eigen::Vector3f epsilon = bd - ad;
+                if (epsilon.norm() == 0)
                 {
-                    // If we've ended up with a non-selection, then collapse
-                    // it to a single choice
-                    if (a == b)
+                    od.push_back(_ad);
+                }
+                else
+                {
+                    auto fa = _ad;
+                    if (fa.push(epsilon))
                     {
-                        auto fa = f_;
-                        fa.pushChoice({id, 0});
-                        todo.push_back(fa);
-                        ambiguous = true;
+                        od.push_back(fa);
                     }
-                    // Check for ambiguity here
-                    else if (f(a, 0) == f(b, 0))
+                    auto fb = _bd;
+                    if (fb.push(-epsilon))
                     {
-                        // Check both branches of the ambiguity
-                        const Eigen::Vector3d rhs(
-                                d.col(b).template cast<double>());
-                        const Eigen::Vector3d lhs(
-                                d.col(a).template cast<double>());
-                        const auto epsilon = (op == Opcode::MIN) ? (rhs - lhs)
-                                                                      : (lhs - rhs);
-
-                        auto fa = f_;
-                        if (fa.push(epsilon, {id, 0}))
-                        {
-                            ambiguous = true;
-                            todo.push_back(fa);
-                        }
-
-                        auto fb = f_;
-                        if (fb.push(-epsilon, {id, 1}))
-                        {
-                            ambiguous = true;
-                            todo.push_back(fb);
-                        }
+                        od.push_back(fb);
                     }
                 }
-            }, ambiguous);
-
-        if (!ambiguous)
-        {
-            f_.deriv = ds.col(0).template head<3>().template cast<double>();
-            if (seen.find(f_.getChoices()) == seen.end())
-            {
-                seen.insert(f_.getChoices());
-                done.push_back(f_);
             }
-        }
-        pop(); // push(Feature)
+            break;
+        case Opcode::OP_MAX:
+            if (av < bv || a == b)
+            {
+                od = _bds;
+            }
+            else if (av > bv)
+            {
+                od = _ads;
+            }
+            else if (a == b)
+            {
+                od = _ads;
+            }
+            else LOOP2
+            {
+                Eigen::Vector3f epsilon = ad - bd;
+                if (epsilon.norm() == 0)
+                {
+                    od.push_back(_ad);
+                }
+                else
+                {
+                    auto fa = _ad;
+                    if (fa.push(epsilon))
+                    {
+                        od.push_back(fa);
+                    }
+                    auto fb = _bd;
+                    if (fb.push(-epsilon))
+                    {
+                        od.push_back(fb);
+                    }
+                }
+            }
+            break;
+        case Opcode::OP_SUB:
+            STORE2(ad - bd);
+            break;
+        case Opcode::OP_DIV:
+            STORE2((ad*bv - bd*av) / pow(bv, 2));
+            break;
+        case Opcode::OP_ATAN2:
+            STORE2((ad*bv - bd*av) / (pow(av, 2) + pow(bv, 2)));
+            break;
+        case Opcode::OP_POW:
+            // The full form of the derivative is
+            // od = m * (bv * ad + av * log(av) * bd))
+            // However, log(av) is often NaN and bd is always zero,
+            // (since it must be CONST), so we skip that part.
+            STORE2(ad * bv * pow(av, bv - 1));
+            break;
+
+        case Opcode::OP_NTH_ROOT:
+            STORE2((ad.array() == 0)
+                    .select(0, ad * pow(av, 1.0f / bv - 1) / bv));
+            break;
+        case Opcode::OP_MOD:
+            od = _ads;
+            break;
+        case Opcode::OP_NANFILL:
+            od = std::isnan(av) ? _bds : _ads;
+            break;
+        case Opcode::OP_COMPARE:
+            od.push_back(Feature(Eigen::Vector3f::Zero()));
+            break;
+
+        case Opcode::OP_SQUARE:
+            STORE1(ad * av * 2);
+            break;
+        case Opcode::OP_SQRT:
+            STORE1(av < 0 ? Eigen::Vector3f::Zero().eval()
+                          : (ad.array() == 0).select(Eigen::Vector3f::Zero(),
+                                                     (ad / (2 * ov))));
+            break;
+        case Opcode::OP_NEG:
+            STORE1(-ad);
+            break;
+        case Opcode::OP_SIN:
+            STORE1(ad * cos(av));
+            break;
+        case Opcode::OP_COS:
+            STORE1(ad * -sin(av));
+            break;
+        case Opcode::OP_TAN:
+            STORE1(ad * pow(1/cos(av), 2));
+            break;
+        case Opcode::OP_ASIN:
+            STORE1(ad / sqrt(1 - pow(av, 2)));
+            break;
+        case Opcode::OP_ACOS:
+            STORE1(ad / -sqrt(1 - pow(av, 2)));
+            break;
+        case Opcode::OP_ATAN:
+            STORE1(ad / (pow(av, 2) + 1));
+            break;
+        case Opcode::OP_LOG:
+            STORE1(ad / av);
+            break;
+        case Opcode::OP_EXP:
+            STORE1(ad * exp(av));
+            break;
+        case Opcode::OP_ABS:
+            STORE1(av > 0 ? ad : (-ad).eval());
+            break;
+        case Opcode::OP_RECIP:
+            STORE1(ad / -pow(av, 2));
+            break;
+
+        case Opcode::CONST_VAR:
+            od = _ads;
+            break;
+
+        case Opcode::ORACLE:
+            deck->oracles[a]->evalFeatures(od);
+            break;
+
+        case Opcode::INVALID:
+        case Opcode::CONSTANT:
+        case Opcode::VAR_X:
+        case Opcode::VAR_Y:
+        case Opcode::VAR_Z:
+        case Opcode::VAR_FREE:
+        case Opcode::LAST_OP: assert(false);
     }
-    pop(); // specialization
+#undef ov
+#undef od
 
-    assert(done.size() > 0);
-    return done;
+#undef av
+#undef _ads
+#undef ad
 
+#undef bv
+#undef _bds
+#undef bd
+
+#undef STORE1
+#undef STORE2
 }
 
 }   // namespace Kernel

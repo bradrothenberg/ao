@@ -57,6 +57,7 @@ port-eof?
     scm_valid_sym = scm_from_utf8_symbol("valid");
     scm_result_fmt = scm_from_locale_string("~S");
     scm_other_error_fmt = scm_from_locale_string("~A: ~A");
+    scm_in_function_fmt = scm_from_locale_string("In function ~A:\n~A");
     scm_syntax_error_fmt = scm_from_locale_string("~A: ~A in form ~A");
     scm_numerical_overflow_fmt = scm_from_locale_string("~A: ~A in ~A");
 
@@ -64,7 +65,8 @@ port-eof?
     for (auto s : {scm_eval_sandboxed, scm_port_eof_p, scm_valid_sym,
                    scm_syntax_error_sym, scm_numerical_overflow_sym,
                    scm_result_fmt, scm_syntax_error_fmt,
-                   scm_numerical_overflow_fmt, scm_other_error_fmt})
+                   scm_numerical_overflow_fmt, scm_other_error_fmt,
+                   scm_in_function_fmt})
     {
         scm_permanent_object(s);
     }
@@ -159,6 +161,11 @@ void _Interpreter::eval()
                    scm_list_2(key, scm_simple_format(
                         SCM_BOOL_F, scm_cadr(params), scm_caddr(params))));
         }
+        if (!scm_is_false(scm_car(params)))
+        {
+            _str = scm_simple_format(SCM_BOOL_F, scm_in_function_fmt,
+                                     scm_list_2(scm_car(params), _str));
+        }
         auto str = scm_to_locale_string(_str);
         auto stack = scm_to_locale_string(_stack);
         emit(gotError(QString(str), QString(stack),
@@ -211,7 +218,7 @@ void _Interpreter::eval()
             {
                 auto data = scm_cdar(v);
                 auto id = static_cast<Kernel::Tree::Id>(
-                        libfive_tree_id(scm_to_tree(scm_car(data))));
+                        libfive_tree_id(scm_get_tree(scm_car(data))));
                 auto value = scm_to_double(scm_cadr(data));
                 vars[id] = value;
 
@@ -227,9 +234,9 @@ void _Interpreter::eval()
         {
             for (auto r = scm_cdar(result); !scm_is_null(r); r = scm_cdr(r))
             {
-                if (scm_is_tree(scm_car(r)))
+                if (scm_is_shape(scm_car(r)))
                 {
-                    auto tree = scm_to_tree(scm_car(r));
+                    auto tree = scm_get_tree(scm_car(r));
                     auto shape = new Shape(*tree, vars);
                     shape->moveToThread(QApplication::instance()->thread());
                     shapes.push_back(shape);
@@ -261,7 +268,7 @@ Interpreter::Interpreter()
     busy_timer.setSingleShot(true);
     busy_timer.setInterval(100);
     connect(&eval_timer, &QTimer::timeout, &busy_timer,
-            QOverload<>::of(&QTimer::start));
+            static_cast<void (QTimer::*)()>(&QTimer::start));
     connect(&busy_timer, &QTimer::timeout, this, &Interpreter::busy);
     connect(&interpreter, &_Interpreter::gotResult,
             &busy_timer, [&](QString){ busy_timer.stop(); });

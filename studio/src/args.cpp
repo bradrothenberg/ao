@@ -1,6 +1,6 @@
 /*
 Studio: a simple GUI for the libfive CAD kernel
-Copyright (C) 2017  Matt Keeter
+Copyright (C) 2018  Matt Keeter
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -16,24 +16,25 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
-#pragma once
 
-#include <QOpenGLBuffer>
-#include <QOpenGLVertexArrayObject>
-#include <QOpenGLFunctions>
+#include <QCommandLineParser>
 
-class Icosphere : public QOpenGLFunctions
+#include "studio/args.hpp"
+
+Arguments::Arguments(QCoreApplication* app)
 {
-public:
-    Icosphere();
+    QCommandLineParser parser;
+    parser.setApplicationDescription("A simple GUI for the libfive kernel");
+    parser.addHelpOption();
+    parser.addPositionalArgument("filename", "File to load");
 
-    void draw(QMatrix4x4 M, QVector3D pos, float r, QColor color);
-    void initializeGL(int subdiv=4);
+    QCommandLineOption no_syntax("no-syntax", "Turn off syntax highlighting");
+    parser.addOption(no_syntax);
 
-protected:
-    QOpenGLBuffer vert_vbo;
-    QOpenGLBuffer tri_vbo;
-    QOpenGLVertexArrayObject vao;
+    parser.process(*app);
 
-    unsigned tri_count=0;
-};
+    const QStringList ps = parser.positionalArguments();
+    filename = ps.isEmpty() ? "" : ps[0];
+
+    do_syntax = !parser.isSet(no_syntax);
+}

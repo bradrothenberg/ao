@@ -28,6 +28,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "libfive/render/brep/mesh.hpp"
 #include "libfive/eval/eval_jacobian.hpp"
 
+namespace Kernel { class Tape; /*  forward declaration */ }
+
 #include "studio/settings.hpp"
 
 class Shape : public QObject, QOpenGLFunctions
@@ -99,7 +101,8 @@ public:
      *  Ownership is transfered, so the caller is responsible for deleting
      *  the evaluator (or storing it in an owned structure)
      */
-    Kernel::JacobianEvaluator* dragFrom(const QVector3D& pt);
+    std::pair<Kernel::JacobianEvaluator*, std::shared_ptr<Kernel::Tape>>
+    dragFrom(const QVector3D& pt);
 
     /*
      *  Returns another pointer to the solution map
@@ -110,7 +113,7 @@ public:
     /*
      *  Looks up the shape's bounds
      */
-    const Kernel::Region<3>& getBounds() const { return bounds; }
+    const Kernel::Region<3>& getRenderBounds() const { return render_bounds; }
 
     /*
      *  Sets grabbed and redraws as necessary
@@ -159,7 +162,8 @@ protected:
                 Eigen::aligned_allocator<Kernel::XTreeEvaluator>> es;
 
     QScopedPointer<Kernel::Mesh> mesh;
-    Kernel::Region<3> bounds;
+    Kernel::Region<3> render_bounds;
+    Kernel::Region<3> mesh_bounds;
     QPair<Settings, int> next;
 
     /*  running marks not just whether the future has finished, but whether
