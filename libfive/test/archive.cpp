@@ -23,7 +23,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "libfive/eval/oracle.hpp"
 
 using namespace Kernel;
-
+/*
 class ST : public OracleClause
 {
 public:
@@ -47,7 +47,7 @@ public:
         return std::unique_ptr<const OracleClause>(new ST());
     }
 };
-REGISTER_ORACLE_CLAUSE(ST);
+//REGISTER_ORACLE_CLAUSE(ST);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -152,3 +152,4 @@ TEST_CASE("Archive::deserialize")
         }
     }
 }
+*/

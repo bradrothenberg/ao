@@ -57,19 +57,19 @@ TEST_CASE("Mesh::render (sphere normals)")
 
 TEST_CASE("Mesh::render (cylinder)")
 {
-  auto cube = max(max(
-    max(-(Tree::X() + 1.5),
-      Tree::X() - 1.5),
-    max(-(Tree::Y() + 4.5),
-      Tree::Y() - 4.5)),
-    max(-(Tree::Z() + 1.5),
-      Tree::Z() - 1.5));
-  auto c = CylinderYAxis({ 0.f,0.f,0.f }, 1.f);
-
-  auto cyl = max(-c,cube);
-  Region<3> r({ -5.5, -5.5, -5.5 }, { 5.5, 5.5, 5.5 });
-
-  auto mesh = Mesh::render(cyl, r, .1);
+//   auto cube = max(max(
+//     max(-(Tree::X() + 1.5),
+//       Tree::X() - 1.5),
+//     max(-(Tree::Y() + 4.5),
+//       Tree::Y() - 4.5)),
+//     max(-(Tree::Z() + 1.5),
+//       Tree::Z() - 1.5));
+//   auto c = CylinderYAxis({ 0.f,0.f,0.f }, 1.f);
+// 
+//   auto cyl = max(-c,cube);
+//   Region<3> r({ -5.5, -5.5, -5.5 }, { 5.5, 5.5, 5.5 });
+// 
+//   auto mesh = Mesh::render(cyl, r, .1);
 }
 
 TEST_CASE("Mesh::render (cube)")
