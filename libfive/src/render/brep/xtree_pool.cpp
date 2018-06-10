@@ -155,7 +155,7 @@ void XTreePool<N>::run(
 }
 
 template <unsigned N>
-std::unique_ptr<const XTree<N>> XTreePool<N>::build(
+std::unique_ptr<XTree<N>> XTreePool<N>::build(
             const Tree t, Region<N> region,
             double min_feature, double max_err)
 {
@@ -165,7 +165,7 @@ std::unique_ptr<const XTree<N>> XTreePool<N>::build(
 }
 
 template <unsigned N>
-std::unique_ptr<const XTree<N>> XTreePool<N>::build(
+std::unique_ptr<XTree<N>> XTreePool<N>::build(
             XTreeEvaluator* eval, Region<N> region,
             double min_feature, double max_err,
             unsigned workers, std::atomic_bool& cancel)
@@ -176,7 +176,7 @@ std::unique_ptr<const XTree<N>> XTreePool<N>::build(
         XTree<N>::mt = Marching::buildTable<N>();
     }
 
-    std::atomic<XTree<N>*> root(new XTree<N>(nullptr, 0, region));
+    auto root(new XTree<N>(nullptr, 0, region));
     std::atomic_bool done(false);
 
     boost::lockfree::queue<Task<N>*> tasks(workers * 2);
@@ -207,10 +207,10 @@ std::unique_ptr<const XTree<N>> XTreePool<N>::build(
 
     if (cancel.load())
     {
-        auto ptr = root.exchange(nullptr);
-        delete ptr;
+        delete root;
+        root = nullptr;
     }
-    return std::unique_ptr<XTree<N>>(root.load());
+    return std::unique_ptr<XTree<N>>(root);
 }
 
 }   // namespace Kernel
