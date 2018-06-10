@@ -42,6 +42,7 @@ void XTreePool<N>::run(
     std::unique_ptr<Task<N>> task;
     bool idle = false;
     std::stack<Task<N>*, std::vector<Task<N>*>> local;
+
     while (!done.load() && !cancel.load())
     {
         {   // Prioritize picking up a local task before going to
@@ -82,11 +83,6 @@ void XTreePool<N>::run(
         auto tape = task->tape;
         auto t = task->target;
 
-        // We store the parent here, because otherwise it's possible for
-        // another thread to delete t after evalInterval or evalLeaf
-        // by calling parent->collectChildren().
-        auto parent = t->parent;
-
         if (((t->region.upper - t->region.lower) > min_feature).any())
         {
             tape = t->evalInterval(eval->interval, task->tape);
@@ -100,20 +96,19 @@ void XTreePool<N>::run(
                 for (unsigned i=0; i < t->children.size(); ++i)
                 {
                     auto next = new Task<N>();
-                    t->children[i].store(new XTree<N>(t, rs[i]));
-                    next->target = t->children[i];
+                    auto target = new XTree<N>(t, i, rs[i]);
+                    next->target = target;
                     next->tape = tape;
 
                     // If there are available slots, then pass this work
                     // to the queue; otherwise, undo the decrement and
                     // assign it to be evaluated locally.
-                    if (slots-- > 0)
+                    if (slots.load() > 0)
                     {
                         tasks.push(next);
                     }
                     else
                     {
-                        slots++;
                         local.push(next);
                     }
                 }
@@ -122,10 +117,9 @@ void XTreePool<N>::run(
             }
             // First termination condition: if the root of the XTree is
             // empty or filled, then return right away.
-            else if (parent == nullptr)
+            else if (t->parent == nullptr)
             {
-                done.store(true);
-                continue;
+                break;
             }
         }
         else
@@ -135,26 +129,29 @@ void XTreePool<N>::run(
             // Second termination condition: if we did a leaf evaluation
             // on the root of the XTree, then we've been passed a large
             // min_feature and this is the end.
-            if (parent == nullptr)
+            if (t->parent == nullptr)
             {
-                done.store(true);
-                continue;
+                break;
             }
         }
 
         // If all of the children are done, then ask the parent to collect them
         // (recursively, merging the trees on the way up)
-        while(parent && parent->collectChildren(eval, tape, max_err))
+        for (t = t->parent; t && t->collectChildren(eval, tape, max_err);
+             t = t->parent);
+
+        // Third termination condition:  If we just collected children at the
+        // root of the tree (then moved to point at its parent, which is
+        // nullptr), then we're done.
+        if (t == nullptr)
         {
-            parent = parent->parent;
-            // The third termination condition: if we successfully call
-            // collectChildren on the root of the XTree, then we're done.
-            if (parent == nullptr)
-            {
-                done.store(true);
-            }
+            break;
         }
     }
+
+    // If we've broken out of the loop, then we should set the done flag
+    // so that other worker threads also terminate.
+    done.store(true);
 }
 
 template <unsigned N>
@@ -179,7 +176,7 @@ std::unique_ptr<const XTree<N>> XTreePool<N>::build(
         XTree<N>::mt = Marching::buildTable<N>();
     }
 
-    std::atomic<XTree<N>*> root(new XTree<N>(nullptr, region));
+    std::atomic<XTree<N>*> root(new XTree<N>(nullptr, 0, region));
     std::atomic_bool done(false);
 
     boost::lockfree::queue<Task<N>*> tasks(workers * 2);
@@ -188,7 +185,7 @@ std::unique_ptr<const XTree<N>> XTreePool<N>::build(
     task->tape = eval->deck->tape;
 
     tasks.push(task);
-    std::atomic_int slots(workers);
+    std::atomic_int slots(0);
 
     std::vector<std::future<void>> futures;
     futures.resize(workers);
