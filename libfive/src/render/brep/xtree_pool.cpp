@@ -115,24 +115,10 @@ void XTreePool<N>::run(
 
                 continue;
             }
-            // First termination condition: if the root of the XTree is
-            // empty or filled, then return right away.
-            else if (t->parent == nullptr)
-            {
-                break;
-            }
         }
         else
         {
             t->evalLeaf(eval, tape);
-
-            // Second termination condition: if we did a leaf evaluation
-            // on the root of the XTree, then we've been passed a large
-            // min_feature and this is the end.
-            if (t->parent == nullptr)
-            {
-                break;
-            }
         }
 
         // If all of the children are done, then ask the parent to collect them
@@ -140,9 +126,8 @@ void XTreePool<N>::run(
         for (t = t->parent; t && t->collectChildren(eval, tape, max_err);
              t = t->parent);
 
-        // Third termination condition:  If we just collected children at the
-        // root of the tree (then moved to point at its parent, which is
-        // nullptr), then we're done.
+        // Termination condition:  if we've ended up pointing at the parent
+        // of the tree's root (which is nullptr), then we're done and break
         if (t == nullptr)
         {
             break;
@@ -155,7 +140,7 @@ void XTreePool<N>::run(
 }
 
 template <unsigned N>
-std::unique_ptr<const XTree<N>> XTreePool<N>::build(
+std::unique_ptr<XTree<N>> XTreePool<N>::build(
             const Tree t, Region<N> region,
             double min_feature, double max_err)
 {
@@ -165,7 +150,7 @@ std::unique_ptr<const XTree<N>> XTreePool<N>::build(
 }
 
 template <unsigned N>
-std::unique_ptr<const XTree<N>> XTreePool<N>::build(
+std::unique_ptr<XTree<N>> XTreePool<N>::build(
             XTreeEvaluator* eval, Region<N> region,
             double min_feature, double max_err,
             unsigned workers, std::atomic_bool& cancel)
@@ -176,7 +161,7 @@ std::unique_ptr<const XTree<N>> XTreePool<N>::build(
         XTree<N>::mt = Marching::buildTable<N>();
     }
 
-    std::atomic<XTree<N>*> root(new XTree<N>(nullptr, 0, region));
+    auto root(new XTree<N>(nullptr, 0, region));
     std::atomic_bool done(false);
 
     boost::lockfree::queue<Task<N>*> tasks(workers * 2);
@@ -207,10 +192,10 @@ std::unique_ptr<const XTree<N>> XTreePool<N>::build(
 
     if (cancel.load())
     {
-        auto ptr = root.exchange(nullptr);
-        delete ptr;
+        delete root;
+        root = nullptr;
     }
-    return std::unique_ptr<XTree<N>>(root.load());
+    return std::unique_ptr<XTree<N>>(root);
 }
 
 }   // namespace Kernel
