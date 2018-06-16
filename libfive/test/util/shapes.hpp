@@ -39,7 +39,6 @@ Kernel::Tree CylinderYAxis(Eigen::Vector3f start, float r);
 Kernel::Tree rotate2d(Kernel::Tree t, float angle);
 Kernel::Tree move(Kernel::Tree t, Eigen::Vector3f d);
 
-
 //CSG:
 Kernel::Tree CSGUnion(Kernel::Tree tA, Kernel::Tree tB);
 Kernel::Tree CSGSubtract(Kernel::Tree tA, Kernel::Tree tB);
@@ -72,3 +71,5 @@ Kernel::Tree loftBetween(Kernel::Tree tA,
 
 //Transforms
 //Scale, Rotate, Move, Shear etc...
+Kernel::Tree shell(Kernel::Tree t, float offset);
+Kernel::Tree blend(Kernel::Tree a, Kernel::Tree b, float r);

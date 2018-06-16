@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include <cmath>
 
+#include <boost/lockfree/stack.hpp>
 
 #include "libfive/render/brep/xtree.hpp"
 #include "libfive/render/brep/xtree_pool.hpp"
@@ -31,61 +32,61 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 namespace Kernel {
 
+template <unsigned N>
+using LockFreeStack =
+    boost::lockfree::stack<Task<N>, boost::lockfree::fixed_sized<true>>;
+
 ////////////////////////////////////////////////////////////////////////////////
 
 template <unsigned N>
-void XTreePool<N>::run(
-        XTreeEvaluator* eval, boost::lockfree::queue<Task<N>*>& tasks,
-        const float min_feature, const float max_err, std::atomic_int& slots,
+static void run(
+        XTreeEvaluator* eval, LockFreeStack<N>& tasks,
+        const float min_feature, const float max_err,
         std::atomic_bool& done, std::atomic_bool& cancel)
 {
-    std::unique_ptr<Task<N>> task;
-    bool idle = false;
-    std::stack<Task<N>*, std::vector<Task<N>*>> local;
+    std::stack<Task<N>, std::vector<Task<N>>> local;
+    std::stack<XTree<N>*, std::vector<XTree<N>*>> spares;
 
     while (!done.load() && !cancel.load())
     {
-        {   // Prioritize picking up a local task before going to
-            // the MPMC queue, to keep things in this thread for
-            // as long as possible.
-            Task<N>* task_;
-            if (local.size())
-            {
-                task_ = local.top();
-                local.pop();
-            }
-            else if (!tasks.pop(task_))
-            {
-                task_ = nullptr;
-            }
-            task.reset(task_);
+        // Prioritize picking up a local task before going to
+        // the MPMC queue, to keep things in this thread for
+        // as long as possible.
+        Task<N> task;
+        if (local.size())
+        {
+            task = local.top();
+            local.pop();
+        }
+        else if (!tasks.pop(task))
+        {
+            task.target = nullptr;
         }
 
-        // If we failed to get a task, then mark this thread as idle
-        // and keep looping (so that we terminate when either of the
-        // flags are set).
-        if (task.get() == nullptr)
+        // If we failed to get a task, keep looping
+        // (so that we terminate when either of the flags are set).
+        if (task.target == nullptr)
         {
-            if (!idle)
-            {
-                slots++;
-                idle = true;
-            }
             continue;
         }
-        // Otherwise, mark that this thread is no longer available
-        else if (idle)
+
+        auto tape = task.tape;
+        auto t = task.target;
+
+        // Find our local neighbors.  We do this at the last minute to
+        // give other threads the chance to populate more pointers.
+        Neighbors<N> neighbors;
+        if (t->parent)
         {
-            idle = false;
-            slots--;
+            neighbors = task.parent_neighbors.push(
+                t->parent_index, t->parent->children);
         }
 
-        auto tape = task->tape;
-        auto t = task->target;
-
+        // If this tree is larger than the minimum size, then it will either
+        // be unambiguously filled/empty, or we'll need to recurse.
         if (((t->region.upper - t->region.lower) > min_feature).any())
         {
-            tape = t->evalInterval(eval->interval, task->tape);
+            tape = t->evalInterval(eval->interval, task.tape);
 
             // If this Tree is ambiguous, then push the children to the stack
             // and keep going (because all the useful work will be done
@@ -95,19 +96,24 @@ void XTreePool<N>::run(
                 auto rs = t->region.subdivide();
                 for (unsigned i=0; i < t->children.size(); ++i)
                 {
-                    auto next = new Task<N>();
-                    auto target = new XTree<N>(t, i, rs[i]);
-                    next->target = target;
-                    next->tape = tape;
+                    Task<N> next;
+                    if (spares.size())
+                    {
+                        next.target = spares.top();
+                        next.target->reset(t, i, rs[i]);
+                        spares.pop();
+                    }
+                    else
+                    {
+                        next.target = new XTree<N>(t, i, rs[i]);
+                    }
+                    next.tape = tape;
+                    next.parent_neighbors = neighbors;
 
                     // If there are available slots, then pass this work
                     // to the queue; otherwise, undo the decrement and
                     // assign it to be evaluated locally.
-                    if (slots.load() > 0)
-                    {
-                        tasks.push(next);
-                    }
-                    else
+                    if (!tasks.bounded_push(next))
                     {
                         local.push(next);
                     }
@@ -115,38 +121,31 @@ void XTreePool<N>::run(
 
                 continue;
             }
-            // First termination condition: if the root of the XTree is
-            // empty or filled, then return right away.
-            else if (t->parent == nullptr)
-            {
-                break;
-            }
         }
         else
         {
-            t->evalLeaf(eval, tape);
-
-            // Second termination condition: if we did a leaf evaluation
-            // on the root of the XTree, then we've been passed a large
-            // min_feature and this is the end.
-            if (t->parent == nullptr)
-            {
-                break;
-            }
+            t->evalLeaf(eval, neighbors, tape);
         }
 
         // If all of the children are done, then ask the parent to collect them
         // (recursively, merging the trees on the way up)
-        for (t = t->parent; t && t->collectChildren(eval, tape, max_err);
+        for (t = t->parent;
+             t && t->collectChildren(eval, tape, max_err, spares);
              t = t->parent);
 
-        // Third termination condition:  If we just collected children at the
-        // root of the tree (then moved to point at its parent, which is
-        // nullptr), then we're done.
+        // Termination condition:  if we've ended up pointing at the parent
+        // of the tree's root (which is nullptr), then we're done and break
         if (t == nullptr)
         {
             break;
         }
+    }
+
+    // Destroy all spare XTrees.
+    while (spares.size())
+    {
+        delete spares.top();
+        spares.pop();
     }
 
     // If we've broken out of the loop, then we should set the done flag
@@ -157,11 +156,18 @@ void XTreePool<N>::run(
 template <unsigned N>
 std::unique_ptr<XTree<N>> XTreePool<N>::build(
             const Tree t, Region<N> region,
-            double min_feature, double max_err)
+            double min_feature, double max_err,
+            unsigned workers)
 {
-    auto eval = XTreeEvaluator(t);
+    std::vector<XTreeEvaluator, Eigen::aligned_allocator<XTreeEvaluator>> es;
+    es.reserve(workers);
+    for (unsigned i=0; i < workers; ++i)
+    {
+        es.emplace_back(XTreeEvaluator(t));
+    }
     std::atomic_bool cancel(false);
-    return XTreePool<N>::build(&eval, region, min_feature, max_err, 1, cancel);
+    return XTreePool<N>::build(es.data(), region, min_feature,
+                               max_err, workers, cancel);
 }
 
 template <unsigned N>
@@ -179,23 +185,22 @@ std::unique_ptr<XTree<N>> XTreePool<N>::build(
     auto root(new XTree<N>(nullptr, 0, region));
     std::atomic_bool done(false);
 
-    boost::lockfree::queue<Task<N>*> tasks(workers * 2);
-    auto task = new Task<N>;
-    task->target = root;
-    task->tape = eval->deck->tape;
+    LockFreeStack<N> tasks(workers);
+    Task<N> task;
+    task.target = root;
+    task.tape = eval->deck->tape;
 
     tasks.push(task);
-    std::atomic_int slots(0);
 
     std::vector<std::future<void>> futures;
     futures.resize(workers);
     for (unsigned i=0; i < workers; ++i)
     {
         futures[i] = std::async(std::launch::async,
-                [&eval, &tasks, &slots, &cancel, &done,
+                [&eval, &tasks, &cancel, &done,
                  min_feature, max_err, i](){
                     run(eval + i, tasks, min_feature, max_err,
-                        slots, done, cancel);
+                        done, cancel);
                     });
     }
 
