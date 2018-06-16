@@ -225,12 +225,12 @@ Tree CylinderYAxis(Eigen::Vector3f start, float r) {
     - square(Tree::Z() - start.z());
 }
 
-Tree shell(Tree t, float offset)
+Tree shell2(Tree t, float offset)
 {
     return max(t, t - offset);
 }
 
-Tree blend(Tree a, Tree b, float r)
+Tree blend2(Tree a, Tree b, float r)
 {
     auto vc0 = r - a;
     auto vc1 = r - b;

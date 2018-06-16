@@ -90,7 +90,7 @@ TEST_CASE("Mesh::render (cube)")
     auto mesh = Mesh::render(cube, r,.1);
 }
 
-TEST_CASE("Mesh::render (performance)")
+TEST_CASE("Mesh::render (performanceB)")
 {
     std::chrono::time_point<std::chrono::system_clock> start, end;
     std::chrono::duration<double> elapsed;
@@ -264,43 +264,6 @@ TEST_CASE("Mesh::generate (gyroid)")
   mesh->saveSTL("gyroidBlnXThick.stl");
 }
 
-TEST_CASE("Mesh::generate (schwartz)")
-{
-  //Brad
-  std::chrono::time_point<std::chrono::system_clock> start, end;
-  std::chrono::duration<double> elapsed;
-
-
- auto scale = .125f;
- auto radius = 1.5f;
-
-
- auto sphere1 = sphere(3.0f, { 0.f,0.f,0.f });
-
- Kernel::Tree schwarz = cos(Kernel::Tree::X() / scale) + cos(Kernel::Tree::Y() / scale) + cos(Kernel::Tree::Z() / scale);
- Kernel::Tree boxschwarz = max(sphere1, schwarz);
-
-
- Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
-
- // Begin timekeeping
-  start = std::chrono::system_clock::now();
- auto mesh = Mesh::render(boxschwarz, r, 0.05);
-  end = std::chrono::system_clock::now();
-
-  elapsed = end - start;
-
- auto elapsed_ms =
- std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
-
- std::string log = "\nMade schwartz in " +
- std::to_string(elapsed.count()) + " sec";
- WARN(log);
-
- mesh->saveSTL("schwartzBlnX.stl");
-
-}
-
 TEST_CASE("Mesh::render (face count in rectangular prism)")
 {
     auto t = max(max(max(-Tree::X(), Tree::X() - 4),
@@ -366,6 +329,7 @@ TEST_CASE("Mesh::export (.stl)") {
 
 TEST_CASE("Mesh::render (performance)", "[!benchmark]")
 {
+  std::unique_ptr<Kernel::Mesh> mesh = nullptr;
     BENCHMARK("Menger sponge")
     {
         Tree sponge = max(menger(2), -sphere(1, {1.5, 1.5, 1.5}));
@@ -407,51 +371,74 @@ TEST_CASE("Mesh::render (performance)", "[!benchmark]")
 
         Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
 
-        auto mesh = Mesh::render(sphereGyroid, r, 0.025);
+        mesh = Mesh::render(sphereGyroid, r, 0.025);
+
     }
+    mesh->saveSTL("sphereGyroid_Benchmark.stl");
+    mesh = nullptr;
+
+
+
+    BENCHMARK("Sphere / schwartz intersection")
+    {
+      auto scale = .125f;
+      auto radius = 1.5f;
+
+
+      auto sphere1 = sphere(3.0f, { 0.f,0.f,0.f });
+
+      Kernel::Tree schwarz = cos(Kernel::Tree::X() / scale) + cos(Kernel::Tree::Y() / scale) + cos(Kernel::Tree::Z() / scale);
+      Kernel::Tree boxschwarz = max(sphere1, schwarz);
+
+
+      Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
+      mesh = Mesh::render(boxschwarz, r, 0.05);
+    }
+    mesh->saveSTL("schwartzBlnX.stl");
 }
 
 TEST_CASE("Mesh::render (gyroid performance breakdown)", "[!benchmark]")
 {
-    auto scale = 0.5f;
-    auto radius = 1.5f;
-    auto thickness = 0.5;
+  auto scale = 0.5f;
+  auto radius = 1.5f;
+  auto thickness = 0.5;
 
-    auto gyroidSrf =
+  auto gyroidSrf =
     sin(Kernel::Tree::X() / scale) * cos(Kernel::Tree::Y() / scale) +
     sin(Kernel::Tree::Y() / scale) * cos(Kernel::Tree::Z() / scale) +
     sin(Kernel::Tree::Z() / scale) * cos(Kernel::Tree::X() / scale);
 
-    auto gyroid = shell(gyroidSrf, thickness);
-    auto sphere1 = sphere(3.0f, { 0.f,0.f,0.f });
+  auto gyroid = shell(gyroidSrf, thickness);
+  auto sphere1 = sphere(3.0f, { 0.f,0.f,0.f });
 
-    auto sphereGyroid = max(sphere1, gyroid);
-    sphereGyroid = min(sphereGyroid,
-                     min(sphereGyroid ,
-                     (sqrt(abs(sphereGyroid)) + sqrt(abs( sphereGyroid ))) - .5));
+  auto sphereGyroid = max(sphere1, gyroid);
+  sphereGyroid = min(sphereGyroid,
+                     min(sphereGyroid,
+                     (sqrt(abs(sphereGyroid)) + sqrt(abs(sphereGyroid))) - .5));
 
-    Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
+  Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
 
-    std::unique_ptr<XTree<3>> t;
-    BENCHMARK("XTree construction")
-    {
-        t = XTreePool<3>::build(sphereGyroid, r, 0.025, 1e-8, 8);
-    }
+  std::unique_ptr<XTree<3>> t;
+  BENCHMARK("XTree construction")
+  {
+    t = XTreePool<3>::build(sphereGyroid, r, 0.025, 1e-8, 8);
+  }
 
-    std::unique_ptr<Mesh> m;
-    std::atomic_bool cancel(false);
-    BENCHMARK("Mesh building")
-    {
-        m = Mesh::mesh(t, cancel);
-    }
+  std::unique_ptr<Mesh> m;
+  std::atomic_bool cancel(false);
+  BENCHMARK("Mesh building")
+  {
+    m = Mesh::mesh(t, cancel);
+  }
 
-    BENCHMARK("XTree deletion")
-    {
-        t->fastDelete();
-        t.reset();
-    }
+  BENCHMARK("XTree deletion")
+  {
+    t->fastDelete();
+    t.reset();
+  }
 
-    BENCHMARK("Mesh deletion")
-    {
-        m.reset();
-    }
+  BENCHMARK("Mesh deletion")
+  {
+    m.reset();
+  }
+}

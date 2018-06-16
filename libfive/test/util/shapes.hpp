@@ -71,5 +71,5 @@ Kernel::Tree loftBetween(Kernel::Tree tA,
 
 //Transforms
 //Scale, Rotate, Move, Shear etc...
-Kernel::Tree shell(Kernel::Tree t, float offset);
-Kernel::Tree blend(Kernel::Tree a, Kernel::Tree b, float r);
+Kernel::Tree shell2(Kernel::Tree t, float offset);
+Kernel::Tree blend2(Kernel::Tree a, Kernel::Tree b, float r);

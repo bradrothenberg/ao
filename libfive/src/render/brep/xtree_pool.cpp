@@ -30,6 +30,16 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "libfive/render/brep/xtree_pool.hpp"
 #include "libfive/eval/tape.hpp"
 
+// namespace boost {
+// #ifdef BOOST_NO_EXCEPTIONS
+// void throw_exception(std::exception const & e)
+// {
+//   throw 11; // or whatever
+// };
+// #endif
+// }// namespace boost
+// 
+
 namespace Kernel {
 
 template <unsigned N>

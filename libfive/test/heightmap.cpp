@@ -302,17 +302,15 @@ TEST_CASE("Heightmap::render: Performance")
         auto s = sphere(2.0f);
         auto blnSponge =  max(sponge_, s);
         // Begin timekeeping
-        start = std::chrono::system_clock::now();
+        auto  start = std::chrono::system_clock::now();
         auto heightmap = render(blnSponge, r);
-        end = std::chrono::system_clock::now();
+        auto end = std::chrono::system_clock::now();
 
-        elapsed = end - start;
+        auto elapsed = end - start;
 
         auto elapsed_ms =
             std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
 
-        log += "\nRendered sponge in " +
-               std::to_string(elapsed.count()) + " sec";
         heightmap->savePNG("blnMenger.png");
     }
 }
