@@ -277,26 +277,15 @@ TEST_CASE("Heightmap::render: Normal clipping ")
 
 TEST_CASE("Heightmap::render: Performance")
 {
-    std::chrono::time_point<std::chrono::system_clock> start, end;
-    std::chrono::duration<double> elapsed;
-
-    std::string log;
-
-    {   // Build and render sphere
+    BENCHMARK("sphere")
+    {
         Tree t = sphere(1);
-
         Voxels r({-1, -1, -1}, {1, 1, 1}, 500);
-
-        start = std::chrono::system_clock::now();
         auto out = render(t, r)->depth;
-        end = std::chrono::system_clock::now();
-
-        elapsed = end - start;
-
-        log += "Rendered sphere in " + std::to_string(elapsed.count()) + " sec";
     }
 
-    {   // Build and render Menger sponge
+    BENCHMARK("Menger sponge")
+    {
         Tree sponge = menger(2);
 
         Voxels r({-2.5, -2.5, -2.5}, {2.5, 2.5, 2.5}, 250);
@@ -325,8 +314,5 @@ TEST_CASE("Heightmap::render: Performance")
         log += "\nRendered sponge in " +
                std::to_string(elapsed.count()) + " sec";
         heightmap->savePNG("blnMenger.png");
-
     }
-
-    WARN(log);
 }

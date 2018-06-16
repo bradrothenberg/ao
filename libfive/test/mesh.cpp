@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "catch.hpp"
 
 #include "libfive/render/brep/mesh.hpp"
+#include "libfive/render/brep/xtree_pool.hpp"
 #include "libfive/render/brep/region.hpp"
 #include "libfive/solve/bounds.hpp"
 #include "util/shapes.hpp"
@@ -362,3 +363,95 @@ TEST_CASE("Mesh::export (.stl)") {
   cylinderMesh->saveSTL("cylinderMeshX.stl");
   cylinderMesh->saveSTL("cylinderMeshA.stl",false);
 }
+
+TEST_CASE("Mesh::render (performance)", "[!benchmark]")
+{
+    BENCHMARK("Menger sponge")
+    {
+        Tree sponge = max(menger(2), -sphere(1, {1.5, 1.5, 1.5}));
+        Region<3> r({-2.5, -2.5, -2.5}, {2.5, 2.5, 2.5});
+        auto mesh = Mesh::render(sponge, r, 0.02);
+    }
+
+    BENCHMARK("Gradient blended-round spheres")
+    {
+        float blendAmt = 0.125f;
+
+        auto boxB = box({ -2,-2,0 }, { 2,2,1 });
+        auto sphereB = sphere(2.f, {2.f,2.f,0.f});
+        auto blendObj = blend(boxB, sphereB, blendAmt);
+
+        Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
+
+        auto mesh = Mesh::render(blendObj, r, 0.025);
+    }
+
+    BENCHMARK("Sphere / gyroid intersection")
+    {
+        auto scale = 0.5f;
+        auto radius = 1.5f;
+        auto thickness = 0.5;
+
+        auto gyroidSrf =
+        sin(Kernel::Tree::X() / scale) * cos(Kernel::Tree::Y() / scale) +
+        sin(Kernel::Tree::Y() / scale) * cos(Kernel::Tree::Z() / scale) +
+        sin(Kernel::Tree::Z() / scale) * cos(Kernel::Tree::X() / scale);
+
+        auto gyroid = shell(gyroidSrf, thickness);
+        auto sphere1 = sphere(3.0f, { 0.f,0.f,0.f });
+
+        auto sphereGyroid = max(sphere1, gyroid);
+        sphereGyroid = min(sphereGyroid,
+                         min(sphereGyroid ,
+                         (sqrt(abs(sphereGyroid)) + sqrt(abs( sphereGyroid ))) - .5));
+
+        Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
+
+        auto mesh = Mesh::render(sphereGyroid, r, 0.025);
+    }
+}
+
+TEST_CASE("Mesh::render (gyroid performance breakdown)", "[!benchmark]")
+{
+    auto scale = 0.5f;
+    auto radius = 1.5f;
+    auto thickness = 0.5;
+
+    auto gyroidSrf =
+    sin(Kernel::Tree::X() / scale) * cos(Kernel::Tree::Y() / scale) +
+    sin(Kernel::Tree::Y() / scale) * cos(Kernel::Tree::Z() / scale) +
+    sin(Kernel::Tree::Z() / scale) * cos(Kernel::Tree::X() / scale);
+
+    auto gyroid = shell(gyroidSrf, thickness);
+    auto sphere1 = sphere(3.0f, { 0.f,0.f,0.f });
+
+    auto sphereGyroid = max(sphere1, gyroid);
+    sphereGyroid = min(sphereGyroid,
+                     min(sphereGyroid ,
+                     (sqrt(abs(sphereGyroid)) + sqrt(abs( sphereGyroid ))) - .5));
+
+    Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
+
+    std::unique_ptr<XTree<3>> t;
+    BENCHMARK("XTree construction")
+    {
+        t = XTreePool<3>::build(sphereGyroid, r, 0.025, 1e-8, 8);
+    }
+
+    std::unique_ptr<Mesh> m;
+    std::atomic_bool cancel(false);
+    BENCHMARK("Mesh building")
+    {
+        m = Mesh::mesh(t, cancel);
+    }
+
+    BENCHMARK("XTree deletion")
+    {
+        t->fastDelete();
+        t.reset();
+    }
+
+    BENCHMARK("Mesh deletion")
+    {
+        m.reset();
+    }
