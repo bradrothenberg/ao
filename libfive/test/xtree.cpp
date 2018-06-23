@@ -99,19 +99,19 @@ TEST_CASE("XTree<2>::isBranch")
     }
 }
 
-TEST_CASE("XTree<2>::rank")
+TEST_CASE("XTree<2>::rank()")
 {
     SECTION("Containing line")
     {
         auto e = XTreePool<2>::build(Tree::X(), Region<2>({-2, -2}, {2, 2}));
-        REQUIRE(e->rank == 1);
+        REQUIRE(e->rank() == 1);
     }
 
     SECTION("Containing corner")
     {
         Tree a = min(Tree::X(), Tree::Y());
         auto ta = XTreePool<2>::build(a, Region<2>({-3, -3}, {1, 1}));
-        REQUIRE(ta->rank == 2);
+        REQUIRE(ta->rank() == 2);
     }
 }
 
@@ -121,9 +121,10 @@ TEST_CASE("XTree<2>::vertex_count")
     {
         Tree a = min(Tree::X(), Tree::Y());
         auto ta = XTreePool<2>::build(a, Region<2>({-3, -3}, {3, 3}), 100);
-        REQUIRE(ta->rank == 2);
-        REQUIRE(ta->level == 0);
-        REQUIRE(ta->vertex_count == 1);
+        REQUIRE(ta->rank() == 2);
+        REQUIRE(ta->level() == 0);
+        REQUIRE(ta->leaf != nullptr);
+        REQUIRE(ta->leaf->vertex_count == 1);
     }
     SECTION("Diagonally opposite corners")
     {
@@ -132,21 +133,24 @@ TEST_CASE("XTree<2>::vertex_count")
         auto deck = std::make_shared<Deck>(a);
         PointEvaluator eval(deck);
         auto ta = XTreePool<2>::build(a, Region<2>({-3, -3}, {3, 3}), 100);
-        REQUIRE(ta->level == 0);
-        REQUIRE(ta->vertex_count == 2);
-        for (unsigned i=0; i < ta->vertex_count; ++i)
+        REQUIRE(ta->level() == 0);
+        REQUIRE(ta->leaf != nullptr);
+        REQUIRE(ta->leaf->vertex_count == 2);
+        for (unsigned i=0; i < ta->leaf->vertex_count; ++i)
         {
-            auto pt = ta->vert3(i).template cast<float>().eval();
+            auto pt = ta->vert(i).template cast<float>().eval();
             CAPTURE(i);
             CAPTURE(pt.transpose());
-            REQUIRE(fabs(eval.eval(pt)) < 1e-6);
+            Eigen::Vector3f v;
+            v << pt, 0.0f;
+            REQUIRE(fabs(eval.eval(v)) < 1e-6);
         }
     }
 }
 
 TEST_CASE("XTree<3>::vert")
 {
-    auto walk = [](std::unique_ptr<XTree<3>>& xtree,
+    auto walk = [](XTree<3>::Root& xtree,
                    XTreeEvaluator& eval, float err=0.001)
     {
         std::list<const XTree<3>*> todo = {xtree.get()};
@@ -163,18 +167,18 @@ TEST_CASE("XTree<3>::vert")
             }
             if (!t->isBranch() && t->type == Interval::AMBIGUOUS)
             {
-                for (unsigned i=0; i < t->vertex_count; ++i)
+                for (unsigned i=0; i < t->leaf->vertex_count; ++i)
                 {
+                    REQUIRE(t->leaf != nullptr);
+
                     CAPTURE(t->vert(i).transpose());
-                    CAPTURE(t->rank);
-                    CAPTURE(t->level);
-                    CAPTURE(t->vertex_count);
+                    CAPTURE(t->rank());
+                    CAPTURE(t->level());
+                    CAPTURE(t->leaf->vertex_count);
                     CAPTURE(i);
-                    CAPTURE(t->manifold);
-                    CAPTURE((int)t->corner_mask);
-                    CAPTURE(t->region.lower.transpose());
-                    CAPTURE(t->region.upper.transpose());
-                    REQUIRE(eval.feature.eval(t->vert3(i).template cast<float>())
+                    CAPTURE(t->leaf->manifold);
+                    CAPTURE((int)t->leaf->corner_mask);
+                    REQUIRE(eval.feature.eval(t->vert(i).template cast<float>())
                             == Approx(0.0f).margin(err));
                 }
             }

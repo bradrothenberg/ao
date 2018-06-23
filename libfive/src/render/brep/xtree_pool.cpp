@@ -28,6 +28,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "libfive/render/brep/xtree.hpp"
 #include "libfive/render/brep/xtree_pool.hpp"
+#include "libfive/render/brep/pool.hpp"
 #include "libfive/eval/tape.hpp"
 
 // namespace boost {
@@ -52,10 +53,12 @@ template <unsigned N>
 static void run(
         XTreeEvaluator* eval, LockFreeStack<N>& tasks,
         const float min_feature, const float max_err,
-        std::atomic_bool& done, std::atomic_bool& cancel)
+        std::atomic_bool& done, std::atomic_bool& cancel,
+        typename XTree<N>::Root& root, std::mutex& root_lock)
 {
     std::stack<Task<N>, std::vector<Task<N>>> local;
-    std::stack<XTree<N>*, std::vector<XTree<N>*>> spares;
+    Pool<XTree<N>> spare_trees;
+    Pool<typename XTree<N>::Leaf> spare_leafs;
 
     while (!done.load() && !cancel.load())
     {
@@ -82,6 +85,7 @@ static void run(
 
         auto tape = task.tape;
         auto t = task.target;
+        const auto& region = task.region;
 
         // Find our local neighbors.  We do this at the last minute to
         // give other threads the chance to populate more pointers.
@@ -94,35 +98,22 @@ static void run(
 
         // If this tree is larger than the minimum size, then it will either
         // be unambiguously filled/empty, or we'll need to recurse.
-        if (((t->region.upper - t->region.lower) > min_feature).any())
+        if (((region.upper - region.lower) > min_feature).any())
         {
-            tape = t->evalInterval(eval->interval, task.tape);
+            tape = t->evalInterval(eval->interval, region, task.tape);
 
             // If this Tree is ambiguous, then push the children to the stack
             // and keep going (because all the useful work will be done
             // by collectChildren eventually).
             if (t->type == Interval::AMBIGUOUS || t->type == Interval::UNKNOWN)
             {
-                auto rs = t->region.subdivide();
+                auto rs = region.subdivide();
                 for (unsigned i=0; i < t->children.size(); ++i)
                 {
-                    Task<N> next;
-                    if (spares.size())
-                    {
-                        next.target = spares.top();
-                        next.target->reset(t, i, rs[i]);
-                        spares.pop();
-                    }
-                    else
-                    {
-                        next.target = new XTree<N>(t, i, rs[i]);
-                    }
-                    next.tape = tape;
-                    next.parent_neighbors = neighbors;
-
                     // If there are available slots, then pass this work
                     // to the queue; otherwise, undo the decrement and
                     // assign it to be evaluated locally.
+                    Task<N> next(spare_trees.get(t, i), tape, rs[i], neighbors);
                     if (!tasks.bounded_push(next))
                     {
                         local.push(next);
@@ -134,13 +125,14 @@ static void run(
         }
         else
         {
-            t->evalLeaf(eval, neighbors, tape);
+            t->evalLeaf(eval, neighbors, region, tape, spare_leafs);
         }
 
         // If all of the children are done, then ask the parent to collect them
         // (recursively, merging the trees on the way up)
         for (t = t->parent;
-             t && t->collectChildren(eval, tape, max_err, spares);
+             t && t->collectChildren(eval, tape, max_err, region.perp,
+                                     spare_trees, spare_leafs);
              t = t->parent);
 
         // Termination condition:  if we've ended up pointing at the parent
@@ -151,20 +143,19 @@ static void run(
         }
     }
 
-    // Destroy all spare XTrees.
-    while (spares.size())
-    {
-        delete spares.top();
-        spares.pop();
-    }
-
     // If we've broken out of the loop, then we should set the done flag
     // so that other worker threads also terminate.
     done.store(true);
+
+    {   // Release the pooled objects to the root
+        std::lock_guard<std::mutex> lock(root_lock);
+        root.claim(spare_leafs);
+        root.claim(spare_trees);
+    }
 }
 
 template <unsigned N>
-std::unique_ptr<XTree<N>> XTreePool<N>::build(
+typename XTree<N>::Root XTreePool<N>::build(
             const Tree t, Region<N> region,
             double min_feature, double max_err,
             unsigned workers)
@@ -181,7 +172,7 @@ std::unique_ptr<XTree<N>> XTreePool<N>::build(
 }
 
 template <unsigned N>
-std::unique_ptr<XTree<N>> XTreePool<N>::build(
+typename XTree<N>::Root XTreePool<N>::build(
             XTreeEvaluator* eval, Region<N> region,
             double min_feature, double max_err,
             unsigned workers, std::atomic_bool& cancel)
@@ -192,25 +183,24 @@ std::unique_ptr<XTree<N>> XTreePool<N>::build(
         XTree<N>::mt = Marching::buildTable<N>();
     }
 
-    auto root(new XTree<N>(nullptr, 0, region));
+    auto root(new XTree<N>(nullptr, 0));
     std::atomic_bool done(false);
 
     LockFreeStack<N> tasks(workers);
-    Task<N> task;
-    task.target = root;
-    task.tape = eval->deck->tape;
-
-    tasks.push(task);
+    tasks.push(Task<N>(root, eval->deck->tape, region, Neighbors<N>()));
 
     std::vector<std::future<void>> futures;
     futures.resize(workers);
+
+    typename XTree<N>::Root out(root);
+    std::mutex root_lock;
     for (unsigned i=0; i < workers; ++i)
     {
         futures[i] = std::async(std::launch::async,
-                [&eval, &tasks, &cancel, &done,
+                [&eval, &tasks, &cancel, &done, &out, &root_lock,
                  min_feature, max_err, i](){
                     run(eval + i, tasks, min_feature, max_err,
-                        done, cancel);
+                        done, cancel, out, root_lock);
                     });
     }
 
@@ -222,10 +212,12 @@ std::unique_ptr<XTree<N>> XTreePool<N>::build(
 
     if (cancel.load())
     {
-        delete root;
-        root = nullptr;
+        return typename XTree<N>::Root();
     }
-    return std::unique_ptr<XTree<N>>(root);
+    else
+    {
+        return out;
+    }
 }
 
 }   // namespace Kernel

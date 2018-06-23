@@ -30,8 +30,16 @@ namespace Kernel {
 template <unsigned N>
 struct Task
 {
+    Task() : target(nullptr)
+    { /* Nothing to do here */ }
+
+    Task(XTree<N>* t, std::shared_ptr<Tape> p, Region<N> r, Neighbors<N> n)
+        : target(t), tape(p), region(r), parent_neighbors(n)
+    { /* Nothing to do here */ }
+
     XTree<N>* target;
     std::shared_ptr<Tape> tape;
+    Region<N> region;
     Neighbors<N> parent_neighbors;
 };
 
@@ -41,7 +49,7 @@ struct XTreePool
     /*
      *  Simplified construction with fewer arguments, used in unit testing
      */
-    static std::unique_ptr<XTree<N>> build(
+    static typename XTree<N>::Root build(
             const Tree t, Region<N> region,
             double min_feature=0.1, double max_err=1e-8,
             unsigned workers=1);
@@ -51,7 +59,7 @@ struct XTreePool
      *
      *  eval must be the first item in an array of at least `workers` items
      */
-    static std::unique_ptr<XTree<N>> build(
+    static typename XTree<N>::Root build(
             XTreeEvaluator* eval, Region<N> region,
             double min_feature, double max_err,
             unsigned workers, std::atomic_bool& cancel);
