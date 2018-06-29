@@ -418,7 +418,7 @@ TEST_CASE("Mesh::render (gyroid performance breakdown)", "[!benchmark]")
 
   Region<3> r({ -5, -5, -5 }, { 5, 5, 5 });
 
-  std::unique_ptr<XTree<3>> t;
+  Kernel::XTree<3>::Root t;
   BENCHMARK("XTree construction")
   {
     t = XTreePool<3>::build(sphereGyroid, r, 0.025, 1e-8, 8);
@@ -428,12 +428,11 @@ TEST_CASE("Mesh::render (gyroid performance breakdown)", "[!benchmark]")
   std::atomic_bool cancel(false);
   BENCHMARK("Mesh building")
   {
-    m = Mesh::mesh(t, cancel);
+    m = Mesh::mesh(t.get(), cancel);
   }
 
   BENCHMARK("XTree deletion")
   {
-    t->fastDelete();
     t.reset();
   }
 
