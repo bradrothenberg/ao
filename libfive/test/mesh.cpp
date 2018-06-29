@@ -282,6 +282,16 @@ TEST_CASE("Mesh::render (sphere)")
     REQUIRE(true);
 }
 
+TEST_CASE("Mesh::render (cone)")
+{
+    auto z = Tree::Z();
+    auto s = 1 / (-z);
+    auto r = sqrt(square(Tree::X() * s) + square(Tree::Y() * s));
+    auto cone = max(r - 1, max(Tree::Z(), -1 - z));
+    auto m = Mesh::render(cone, Region<3>({-10, -10, -10}, {10, 10, 10}), 0.1);
+    REQUIRE(true);
+}
+
 TEST_CASE("Mesh::export (.stl)") {
   auto cube = max(max(
     max(-(Tree::X() + 1.5),

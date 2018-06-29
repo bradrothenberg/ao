@@ -120,6 +120,11 @@ Tape::Handle XTree<N>::evalInterval(
             tape);
 
     type = Interval::state(o.first);
+    if (!eval.isSafe())
+    {
+        type = Interval::AMBIGUOUS;
+        return tape;
+    }
 
     if (type == Interval::FILLED || type == Interval::EMPTY)
     {
@@ -196,12 +201,12 @@ void XTree<N>::evalLeaf(XTreeEvaluator* eval, const Neighbors<N>& neighbors,
         // is sufficiently close to zero, then fall back to the
         // canonical single-point evaluator to avoid inconsistency.
         if (fabs(vs(i)) < 1e-6)
-         {
+        {
             vs(i) = eval->feature.eval(pos.col(i));
         }
 
         // Handle inside, outside, and (non-ambiguous) on-boundary
-        if (vs(i) > 0 || !std::isfinite(vs(i)))
+        if (vs(i) > 0 || std::isnan(vs(i)))
         {
             corners[corner_indices[i]] = Interval::EMPTY;
             ambig(i) = false;
@@ -453,23 +458,10 @@ void XTree<N>::evalLeaf(XTreeEvaluator* eval, const Neighbors<N>& neighbors,
                     // derivatives value calculated and stored in ds.
                     if (!ambig(i))
                     {
-                        const Eigen::Array<double, N, 1> derivs = ds.col(i)
-                            .template cast<double>().template head<N>();
-                        const double norm = derivs.matrix().norm();
-
-                        // Find normalized derivatives and distance value
-                        Eigen::Matrix<double, N, 1> dv = derivs / norm;
-                        if (dv.array().isFinite().all())
-                        {
-                            if (leaf->intersections[eval_edges[i/2]] == nullptr)
-                            {
-                                leaf->intersections[eval_edges[i/2]].reset(
-                                        new IntersectionVec<N>);
-                            }
-                            leaf->intersections[eval_edges[i/2]]->
-                                 push_back({pos.template head<N>(),
-                                            dv, ds.col(i).w() / norm});
-                        }
+                        saveIntersection(pos.template head<N>(),
+                                         ds.col(i).template cast<double>()
+                                                  .template head<N>(),
+                                         ds.col(i).w(), eval_edges[i/2]);
                     }
                     // Otherwise, we need to use the feature-finding special
                     // case to find all possible derivatives at this point.
@@ -480,27 +472,10 @@ void XTree<N>::evalLeaf(XTreeEvaluator* eval, const Neighbors<N>& neighbors,
 
                         for (auto& f : fs)
                         {
-                            // Unpack 3D derivatives into XTree-specific
-                            // dimensionality, and find normal.
-                            const Eigen::Array<double, N, 1> derivs = f
-                                .template head<N>()
-                                .template cast<double>();
-                            const double norm = derivs.matrix().norm();
-
-                            // Find normalized derivatives and distance
-                            // value (from the earlier evaluation)
-                            Eigen::Matrix<double, N, 1> dv = derivs / norm;
-                            if (dv.array().isFinite().all())
-                            {
-                                if (leaf->intersections[eval_edges[i/2]] == nullptr)
-                                {
-                                    leaf->intersections[eval_edges[i/2]].reset(
-                                            new IntersectionVec<N>);
-                                }
-                                leaf->intersections[eval_edges[i/2]]->
-                                     push_back({pos.template head<N>(),
-                                            dv, ds.col(i).w() / norm});
-                            }
+                            saveIntersection(pos.template head<N>(),
+                                             f.template head<N>()
+                                              .template cast<double>(),
+                                             ds.col(i).w(), eval_edges[i/2]);
                         }
                     }
                 }
@@ -525,15 +500,18 @@ void XTree<N>::evalLeaf(XTreeEvaluator* eval, const Neighbors<N>& neighbors,
             {
                 for (const auto& t : *leaf->intersections[edges[i]])
                 {
-                    bool matched = false;
-                    for (auto& v : prev_normals)
+                    if (t.deriv != Vec::Zero())
                     {
-                        matched |= (t.deriv.dot(v.deriv) >= 0.9);
-                    }
-                    if (!matched)
-                    {
-                        edge_ranks[i]++;
-                        prev_normals.push_back(t);
+                        bool matched = false;
+                        for (auto& v : prev_normals)
+                        {
+                            matched |= (t.deriv.dot(v.deriv) >= 0.9);
+                        }
+                        if (!matched)
+                        {
+                            edge_ranks[i]++;
+                            prev_normals.push_back(t);
+                        }
                     }
                 }
             }
@@ -574,8 +552,13 @@ void XTree<N>::evalLeaf(XTreeEvaluator* eval, const Neighbors<N>& neighbors,
         size_t rows = 0;
         for (unsigned i=0; i < edge_count; ++i)
         {
-            rows += leaf->intersections[edges[i]]
-                ? leaf->intersections[edges[i]]->size() : 0;
+            for (const auto& n : *leaf->intersections[edges[i]])
+            {
+                if (n.deriv != Vec::Zero())
+                {
+                    rows++;
+                }
+            }
         }
 
         // Now, we'll unpack into A and b matrices
@@ -608,12 +591,16 @@ void XTree<N>::evalLeaf(XTreeEvaluator* eval, const Neighbors<N>& neighbors,
             {
                 for (auto& n : *leaf->intersections[edges[i]])
                 {
-                    A.row(r) << n.deriv.transpose();
-                    b(r) = A.row(r).dot(n.pos) - n.value;
-                    r++;
+                    if (n.deriv != Vec::Zero())
+                    {
+                        A.row(r) << n.deriv.transpose();
+                        b(r) = A.row(r).dot(n.pos) - n.value;
+                        r++;
+                    }
                 }
             }
         }
+        assert(r == rows);
 
         // Save compact QEF matrices
         auto At = A.transpose().eval();
@@ -649,6 +636,37 @@ void XTree<N>::releaseChildren(Pool<XTree>& spare_trees,
             ptr->leaf = nullptr;
             spare_leafs.put(leaf);
         }
+    }
+}
+
+template <unsigned N>
+void XTree<N>::saveIntersection(const Vec& pos, const Vec& derivs,
+                                const double value, const size_t edge)
+{
+    const double norm = derivs.matrix().norm();
+
+    // Find normalized derivatives and distance value
+    Eigen::Matrix<double, N, 1> dv = derivs / norm;
+
+
+    // Just-in-time allocation of intersections array
+    if (leaf->intersections[edge] == nullptr)
+    {
+        leaf->intersections[edge].reset(
+                new IntersectionVec<N>);
+    }
+
+    // If the point has a valid normal, then store it
+    if (dv.array().isFinite().all())
+    {
+        leaf->intersections[edge]->
+             push_back({pos, dv, value / norm});
+    }
+    // Otherwise, store an intersection with a zero normal
+    else
+    {
+        leaf->intersections[edge]->
+             push_back({pos, Vec::Zero(), 0});
     }
 }
 

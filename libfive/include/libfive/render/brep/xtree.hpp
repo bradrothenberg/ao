@@ -302,6 +302,20 @@ protected:
      */
     void releaseChildren(Pool<XTree<N>>& spare_trees,
                          Pool<Leaf>& spare_leafs);
+
+    /*
+     *  Writes the given intersection into the intersections list
+     *  for the specified edge.  Allocates an interesections list
+     *  if none already exists.  The given set of derivatives is normalized
+     *  (to become a surface normal).  If the normal is invalid, then
+     *  we store an intersection with an all-zero normal.  This means we
+     *  can still use the intersection for mass-point calculation, but
+     *  can detect that the normal is invalid (and so will not use it for
+     *  building the A and b matrices).
+     */
+    void saveIntersection(const Vec& pos, const Vec& derivs,
+                          const double value, const size_t edge);
+
     /*
      *  Returns a table such that looking up a particular corner
      *  configuration returns whether that configuration is safe to
